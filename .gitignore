@@ -1,0 +1,48 @@
+# Rust
+/target/
+**/target/
+**/*.rs.bk
+
+# Node / Cloudflare
+node_modules/
+.wrangler/
+dist/
+.dev.vars
+.dev.vars.*
+
+# Android / Gradle
+.gradle/
+local.properties
+*.iml
+.idea/
+.kotlin/
+captures/
+**/build/
+*.apk
+*.aab
+
+# Secrets — never commit (see CLAUDE.md "Security invariants")
+google-services.json
+*service-account*.json
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.pem
+*.key
+.env
+.env.*
+
+# Local, per-developer notes for agents
+CLAUDE.local.md
+
+# Spike / measurement raw output
+spikes/**/out/
+measurements/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/*
+!.vscode/extensions.json
