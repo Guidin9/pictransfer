@@ -2,7 +2,7 @@
 resolver = "3"
 members = ["crates/core", "crates/cli", "apps/windows-agent"]
 # Spikes are throwaway standalone crates; the server is TypeScript.
-exclude = ["spikes", "server"]
+exclude = ["spikes", "server", "apps/windows-ui"]
 
 [workspace.package]
 version = "0.1.0"
