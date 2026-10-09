@@ -38,4 +38,7 @@ static X-Wing key and signed by the sender (protocol §7–8).
 
 - **TLS only, relying on rustls' X25519MLKEM768:** whether the iroh build
   negotiates it is not guaranteed, and it is not under our control.
+  *Update 2026-10-09 (ADR 0008):* iroh 1.3 can require X25519MLKEM768, but only
+  with the `tls-aws-lc-rs` backend; with `tls-ring` TLS is classical. Wake
+  envelopes do not use TLS, so the decision stands.
 - **Noise with a PQ extension:** less standard tooling in Rust.

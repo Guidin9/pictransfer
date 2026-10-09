@@ -19,12 +19,13 @@ connection (`docs/dev-setup.md`).
 - [x] **F0-5** Decide names: app name **Warpshot** (formerly the working name
   `pictransfer`), Android `applicationId` `io.github.guidin9.warpshot`, Worker
   name `warpshot`. Binaries: `warpshot-agent.exe`, `warpshot-ui.exe`, `warpctl`.
-- [ ] **F0-6** `[DL]` Spike A — iroh on demand (`docs/spikes.md`).
+- [ ] **F0-6** `[DL]` Spike A — iroh on demand (`docs/spikes.md`). Windows part done
+  2026-10-09; the Android and cross-network rows run with Spike D on the phone.
 - [ ] **F0-7** `[DL]` Spike B — agent skeleton vs the idle budget; first row in
   `resource-budget.md` §4.
 - [ ] **F0-8** `[DL]` Spike C — DO keepalive. Set K in protocol §6.3.
 - [ ] **F0-9** `[DL]` Spike D — Android wake path on the user's phone.
-- [ ] **F0-10** ADR 0008, crate choices: X-Wing implementation, CBOR crate
+- [x] **F0-10** ADR 0008, crate choices: X-Wing implementation, CBOR crate
   (`minicbor` vs `ciborium`, judged by strict-decoding support), SQLite binding.
 
 ## Faz 1 — MVP (personal use)

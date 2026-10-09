@@ -1,0 +1,29 @@
+[package]
+name = "iroh-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Spike A: is iroh 1.x fast and lean enough to start on demand? (throwaway)"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+anyhow = "1"
+# No default features: no portmapper, no metrics. Only the ring TLS provider.
+iroh = { version = "1.3", default-features = false, features = ["tls-ring"] }
+n0-future = "0.3"
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "macros", "time", "io-util"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+] }
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"

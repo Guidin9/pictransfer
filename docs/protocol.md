@@ -18,10 +18,13 @@ Contents: 1 Conventions · 2 Cryptography · 3 Identities · 4 Membership log ·
 - JSON byte strings are base64url **without padding** (RFC 4648 §5), written `b64u`.
 - **CBOR** (RFC 8949) is used for all binary structures:
   - Maps use small unsigned-integer keys. Encoders MUST use preferred serialization
-    (shortest-form integers and lengths, definite lengths only).
-  - Decoders MUST reject indefinite-length items, duplicate map keys, tags,
-    floats, nesting deeper than 8, and any size above the limits in §10 —
-    **before** allocating.
+    (shortest-form integers and lengths, definite lengths only) and write map
+    keys in ascending order.
+  - Decoders MUST reject indefinite-length items, non-shortest integers or
+    lengths, duplicate map keys, map keys out of ascending order, tags, floats,
+    nesting deeper than 8, trailing bytes after the top-level item, and any size
+    above the limits in §10 — **before** allocating. (Each rule has a negative
+    test; the decoder is hand-written and fuzzed, ADR 0008.)
   - Decoders MUST ignore unknown map keys (forward compatibility) unless a
     section says otherwise.
 - Signed structures carry the exact signed bytes as a CBOR byte string. Receivers
@@ -35,7 +38,7 @@ Contents: 1 Conventions · 2 Cryptography · 3 Identities · 4 Membership log ·
 | Purpose | Algorithm |
 |---|---|
 | Device identity, signatures | Ed25519 (RFC 8032). Verification MUST be strict: reject non-canonical encodings and small-order points (`verify_strict`). |
-| Hybrid post-quantum KEM | X-Wing (X25519 + ML-KEM-768), `draft-connolly-cfrg-xwing-kem-06`. Encapsulation key 1216 B, ciphertext 1120 B, shared secret 32 B. |
+| Hybrid post-quantum KEM | X-Wing (X25519 + ML-KEM-768), `draft-connolly-cfrg-xwing-kem-06` (wire format and combiner unchanged through draft -11). Encapsulation key 1216 B, ciphertext 1120 B, shared secret 32 B. Decapsulation MUST fail when the X25519 shared secret is all zero (non-contributory peer share); a negative test vector covers it. |
 | KDF | HKDF-SHA-256 (RFC 5869) |
 | MAC | HMAC-SHA-256 |
 | AEAD | ChaCha20-Poly1305 (RFC 8439), 96-bit nonce, 128-bit tag |
@@ -44,9 +47,9 @@ Contents: 1 Conventions · 2 Cryptography · 3 Identities · 4 Membership log ·
 | Transport | iroh 1.x: QUIC + TLS 1.3 with Ed25519 raw public keys. Peer identity = `EndpointId`. |
 | Randomness | OS CSPRNG |
 
-Implementation notes (non-normative): X-Wing from `libcrux-kem` (formally verified
-ML-KEM) or RustCrypto `x-wing`. Pick in Spike A by test-vector conformance and
-audit status. Also use `hkdf`, `hmac`, `sha2`, `chacha20poly1305`, `blake3`,
+Implementation notes (non-normative): X-Wing from RustCrypto `x-wing` with the
+`zeroize` feature, decapsulating with `DecapsulationKeyRejectNonContrib`; the
+returned shared key is zeroized by the caller (ADR 0008). Also use `hkdf`, `hmac`, `sha2`, `chacha20poly1305`, `blake3`,
 `zeroize`, `subtle` (constant-time). The Cloudflare Worker uses WebCrypto (Ed25519, SHA-256).
 
 ### 2.2 Keys

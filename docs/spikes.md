@@ -31,7 +31,41 @@ Results:
 
 | Date | Device | A1 | A2 (LAN / x-net / relay) | A4 | A5 | A6 | Notes |
 |---|---|---|---|---|---|---|---|
-| – | – | – | – | – | – | – | – |
+| 2026-10-09 | PC ↔ PC (same Win11 host, 12 threads), EU relay, slow home uplink | bind 27–82 ms ✓; home relay online 0.77–1.15 s ✗ | 33–51 ms bind→connected ✓ / pending (phone) / 400–561 ms | 128–166 MB/s ✓; relay 0.5 MB/s (10 MB) | 0.9 → peak 5.0–6.7 → 3.6 MB; 0.07 MB after trim ✓ | all ✓ | see below |
+| – | Android | – | – | – | – | – | pending, run with Spike D on the phone |
+
+Probe: `spikes/iroh-probe` (iroh 1.3.0, `default-features = false`, `tls-ring`;
+release build). Raw JSON in `spikes/iroh-probe/out/` (not committed).
+
+Findings and the API usage they fix:
+- **Never wait for `Endpoint::online()` before dialing.** It took ~0.8 s (it
+  waits for the home relay); a dial with known direct addresses connects 33–51 ms
+  after `bind` starts, relay-only 400–561 ms. The sender's relay connection
+  overlaps the wake round-trip (WS/FCM, seconds), so A1's miss does not delay a
+  transfer. Pass criterion A1 is therefore replaced by "bind < 100 ms, dial
+  without waiting for online".
+- **"Is direct"** = `conn.paths().iter().any(|p| p.is_selected() && p.is_ip())`.
+  Take one `paths()` snapshot right after `connect`, then follow
+  `conn.path_events()` (`Selected { remote_addr }` with `remote_addr.is_ip()`);
+  a selection made during the handshake does not appear as an event.
+- **EKM:** `Connection::export_keying_material(&mut out, label, context)` gives
+  equal 32 bytes on both sides (checked on every run).
+- **A6 configuration:** `Endpoint::builder(presets::Minimal)` +
+  `.relay_mode(RelayMode::custom([defaults::prod::default_eu_relay().url]))` +
+  `.clear_address_lookup()`; relay-only test via `.clear_ip_transports()`.
+  Runs on `#[tokio::main(flavor = "current_thread")]`.
+- **Threads:** 4 before bind (main + OS loader pool), 9 while the endpoint
+  lives (one `tokio-rt-worker` blocking-pool thread + OS thread-pool workers used
+  by sockets and network-change notifications), back to 8 at close+30 s, 5 at
+  +60 s, 3 at +140 s. Nothing persistent: the ≤ 6 idle-thread budget holds about
+  a minute after a transfer.
+- **Memory:** private working set returns to baseline + ≤ 2 MB only after
+  trimming the working set (`SetProcessWorkingSetSize(-1, -1)`); untrimmed it
+  stays ~2.7 MB above baseline. Private bytes stay +3 MB after close (committed,
+  not resident) — check against the 12 MB private-bytes budget in Spike B.
+- **A7:** `x-wing` chosen (ADR 0008).
+- Path events show several IP paths opening and closing within the first ~30 ms
+  (multiple local interfaces); harmless.
 
 ## Spike B — agent skeleton vs the idle budget
 
