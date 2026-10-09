@@ -9,3 +9,4 @@ pub mod server_auth;
 #[cfg(test)]
 mod vectors;
 pub mod wake;
+pub mod xfer;

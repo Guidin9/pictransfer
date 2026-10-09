@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     cbor::{self, Encoder, FieldError, Limits, MapRef, Value},
-    keys::{EndpointId, IdentityKey, KEM_PK_LEN, verify_strict},
+    keys::{EndpointId, IdentityKey, KEM_PK_LEN, is_valid_public_key, verify_strict},
 };
 
 pub const RECORD_LABEL: &[u8] = b"warpshot/record/v1\0";
@@ -73,7 +73,10 @@ impl DeviceInfo {
 
     pub fn parse(m: MapRef<'_, '_>) -> Result<Self, LogError> {
         let name = m.text(0)?;
-        if name.is_empty() || name.len() > 64 || name.chars().any(char::is_control) {
+        if name.is_empty()
+            || name.len() > 64
+            || name.chars().any(|c| c.is_control() || is_bidi_format(c))
+        {
             return Err(LogError::DeviceName);
         }
         let platform = m.uint(1)?;
@@ -95,6 +98,11 @@ impl DeviceInfo {
             app: app.map(str::to_owned),
         })
     }
+}
+
+/// Bidi formatting characters that could spoof the §4.6 alert text (§3).
+fn is_bidi_format(c: char) -> bool {
+    matches!(c, '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -244,6 +252,7 @@ pub enum LogError {
     TimeFuture,
     TimeRegress,
     AddExisting,
+    SubjectKey,
     RemoveMissing,
     UpdateNotSelf,
     UpdatePlatform,
@@ -475,6 +484,9 @@ impl Log {
             Op::Add(_) => {
                 if self.members.contains_key(&body.subject) {
                     return Err(LogError::AddExisting);
+                }
+                if !is_valid_public_key(&body.subject) {
+                    return Err(LogError::SubjectKey);
                 }
                 if self.members.len() >= MAX_MEMBERS {
                     return Err(LogError::TooManyMembers);

@@ -88,7 +88,7 @@ All secrets MUST be zeroized after use and MUST NOT be logged.
 
   | Key | Field | Type | Rules |
   |---|---|---|---|
-  | 0 | `name` | tstr | 1–64 bytes UTF-8, no control characters |
+  | 0 | `name` | tstr | 1–64 bytes UTF-8, no control characters (Cc) and no bidi formatting characters (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069), which could spoof the §4.6 alert |
   | 1 | `platform` | uint | 1 = windows, 2 = android; other values are reserved for new platforms. Receivers MUST accept them (shown as "other") so a newer member never breaks an older client's log. 0 is invalid. |
   | 2 | `kem_pk` | bstr | exactly 1216 bytes (X-Wing encapsulation key) |
   | 3 | `app` | tstr | ≤ 32 bytes, app version, informational |
@@ -142,7 +142,7 @@ and head id `H`. Record `R` at position `n` is valid **iff all** hold:
 3. `created_at ≤ now + 10 min`, and for `n > 0` also `created_at ≥ created_at(n-1) − 10 min`.
    Order comes from `seq`, not from time.
 4. Operation rules:
-   - `add`: `subject ∉ S`, `device` present. Re-adding a previously removed key is a new admission and is allowed.
+   - `add`: `subject ∉ S`, `device` present, `subject` is a valid Ed25519 public key that is not of small order. Re-adding a previously removed key is a new admission and is allowed.
    - `remove`: `subject ∈ S`. A member may remove itself (leave).
    - `update`: `signer == subject`, `device` present, `device.platform` unchanged (rename or KEM key rotation).
 5. `Ed25519.VerifyStrict(signer, "warpshot/record/v1\0" ‖ body, sig)` succeeds.
@@ -353,7 +353,10 @@ When a `remove` is accepted, the server:
 ### 6.7 Server storage (Durable Object, SQLite)
 
 `records(seq PK, id, bytes)`, `devices(eid PK, push_provider, push_token, last_seen)`,
-`meta(head_seq, head_id, created_at)`. Nothing else. The application does not log
+`meta(head_seq, head_id, created_at)`, `replay(hash PK, expires)` for the §6.1
+replay cache (it must survive hibernation, so it cannot live in memory), and the
+cached FCM OAuth token (< 1 h) in the object's key-value storage. Nothing else.
+Rate-limit counters are in memory and reset when the object hibernates. The application does not log
 IP addresses (Cloudflare's own platform logs are outside our control; see the
 threat model).
 
@@ -525,7 +528,10 @@ admission (§8.1) is checked again.
 - `dir` is the direction byte: `0x00` for d>l, `0x01` for l>d.
 - `k_item = HKDF-Expand(prk, "warpshot/xfer-kdf/v1 item" ‖ u8(dir) ‖ u32be(id) ‖ th, 32)`.
 - `nonce = 0^7 ‖ u32be(chunk_index) ‖ u8(last)`, where `last` is 0x00 or 0x01
-  (STREAM construction). `aad = u32be(id)`.
+  (STREAM construction). `aad = u32be(id)`. The `last` flag is not sent: a chunk
+  shorter than 64 KiB (ciphertext < 65552 bytes) is opened as last; a full-size
+  chunk is opened as non-last first and, if that fails, as last. A non-last chunk
+  MUST carry exactly 64 KiB of plaintext.
 - **Receiver procedure:**
   1. Write to a temporary file in the destination directory, updating BLAKE3 as data arrives.
   2. After the `last` chunk, require `bytes == Item.size` and `BLAKE3 == ItemDone.blake3`.

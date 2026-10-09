@@ -330,6 +330,21 @@ fn record_vectors() -> J {
         LogError::DeviceName,
     );
     bad(
+        "device name with bidi override U+202E",
+        raw_record(
+            &a,
+            base(1, vec![(7, dmap(&dev("pc\u{202E}evil", 2, 5)))], n, cid),
+        ),
+        LogError::DeviceName,
+    );
+    let mut small = [0u8; 32];
+    small[0] = 1; // identity point: small order
+    bad(
+        "add subject is a small-order point",
+        raw_record(&a, base(1, vec![(7, dmap(&d))], n, small)),
+        LogError::SubjectKey,
+    );
+    bad(
         "platform 0",
         raw_record(&a, base(1, vec![(7, dmap(&dev("t", 0, 5)))], n, cid)),
         LogError::DevicePlatform,

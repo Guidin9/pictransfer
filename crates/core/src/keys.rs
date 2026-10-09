@@ -102,6 +102,11 @@ pub fn verify_strict(signer: &EndpointId, msg: &[u8], sig: &[u8; 64]) -> bool {
     vk.verify_strict(msg, &Signature::from_bytes(sig)).is_ok()
 }
 
+/// True if `id` decodes to an Ed25519 point that is not of small order.
+pub fn is_valid_public_key(id: &EndpointId) -> bool {
+    VerifyingKey::from_bytes(&id.0).is_ok_and(|vk| !vk.is_weak())
+}
+
 /// X-Wing KEM key `KK`, stored as its 32-byte seed.
 pub struct KemKey {
     seed: Zeroizing<[u8; 32]>,

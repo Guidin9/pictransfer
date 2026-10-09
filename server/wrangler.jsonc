@@ -1,0 +1,15 @@
+// Warpshot wake/log server (protocol.md §6, ADR 0004).
+// No account_id and no URLs here (ADR 0007): wrangler uses the logged-in
+// account; secrets (FCM_SERVICE_ACCOUNT, GROUP_CREATE_TOKEN) are set with
+// `wrangler secret put` and never committed.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "warpshot",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-15",
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [{ "name": "GROUPS", "class_name": "GroupDO" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GroupDO"] }]
+}
