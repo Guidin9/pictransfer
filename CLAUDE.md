@@ -1,4 +1,4 @@
-# CLAUDE.md — pictransfer
+# CLAUDE.md — warpshot
 
 Android ⇄ Windows instant transfer of screenshots, text and files. End-to-end
 encrypted P2P (iroh) with a post-quantum inner layer, a passwordless QR device
@@ -47,7 +47,7 @@ group, and a $0 Cloudflare wake-up server.
 - Add a URL protocol handler or a local HTTP server to the agent (use the named
   pipe and the COM toast activator).
 
-## Agent (`pt-agent.exe`) rules
+## Agent (`warpshot-agent.exe`) rules
 
 - Two threads at idle: the Win32 message loop and one tokio `current_thread`
   runtime (server WebSocket + named-pipe IPC). No other threads, timers or polling.
@@ -59,11 +59,11 @@ group, and a $0 Cloudflare wake-up server.
 ## Repository layout (target)
 
 ```
-crates/core   pt-core   protocol, crypto, log, pairing, iroh endpoint manager, transfers, storage
-crates/ffi    pt-ffi    UniFFI bindings for Android
-crates/cli    ptctl     headless peer for E2E tests and spikes
-apps/windows-agent      pt-agent.exe (Rust, Win32)
-apps/windows-ui         pt-ui.exe (Tauri v2 + React/TS)
+crates/core             warpshot-core   protocol, crypto, log, pairing, iroh endpoint manager, transfers, storage
+crates/ffi              warpshot-ffi    UniFFI bindings for Android
+crates/cli              warpctl         headless peer for E2E tests and spikes
+apps/windows-agent      warpshot-agent.exe (Rust, Win32)
+apps/windows-ui         warpshot-ui.exe (Tauri v2 + React/TS)
 apps/android            Kotlin + Jetpack Compose, minSdk 29
 server/                 Cloudflare Worker + Durable Object (TypeScript, vitest)
 spikes/                 throwaway Faz 0 experiments
@@ -94,7 +94,7 @@ Filled in as components land. Planned:
 cargo fmt --all; cargo clippy --workspace --all-targets -- -D warnings; cargo test --workspace
 cargo deny check
 cd server; npm ci --ignore-scripts; npm test
-powershell -ExecutionPolicy Bypass -File scripts\measure-idle.ps1 -ProcessName pt-agent
+powershell -ExecutionPolicy Bypass -File scripts\measure-idle.ps1 -ProcessName warpshot-agent
 powershell -ExecutionPolicy Bypass -File scripts\e2e-local.ps1
 ```
 

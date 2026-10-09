@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Measures a process's idle resource usage against the pictransfer agent budget.
+  Measures a process's idle resource usage against the warpshot agent budget.
 
 .DESCRIPTION
   After an optional warm-up, samples the process every -SampleSeconds for
@@ -19,14 +19,14 @@
   Budget defaults come from docs/resource-budget.md.
 
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File scripts\measure-idle.ps1 -ProcessName pt-agent
+  powershell -ExecutionPolicy Bypass -File scripts\measure-idle.ps1 -ProcessName warpshot-agent
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts\measure-idle.ps1 -ProcessId 1234 -WarmupSeconds 0 -DurationSeconds 30 -SampleSeconds 2
 #>
 [CmdletBinding(DefaultParameterSetName = 'ByName')]
 param(
     [Parameter(ParameterSetName = 'ByName')]
-    [string]$ProcessName = 'pt-agent',
+    [string]$ProcessName = 'warpshot-agent',
 
     [Parameter(ParameterSetName = 'ById', Mandatory = $true)]
     [int]$ProcessId,

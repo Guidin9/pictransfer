@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  One-shot, idempotent developer setup for pictransfer on Windows.
+  One-shot, idempotent developer setup for warpshot on Windows.
 
 .DESCRIPTION
   Installs only what is missing:

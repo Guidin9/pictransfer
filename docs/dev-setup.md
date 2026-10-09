@@ -67,7 +67,7 @@ installer shows one UAC prompt.
 ```powershell
 rustc -vV          # host: x86_64-pc-windows-msvc
 cargo --version
-cargo new $env:TEMP\pt-hello; cargo run --manifest-path $env:TEMP\pt-hello\Cargo.toml   # builds & links without extra downloads
+cargo new $env:TEMP\warpshot-hello; cargo run --manifest-path $env:TEMP\warpshot-hello\Cargo.toml   # builds & links without extra downloads
 node --version     # ≥ 22 (built-in WebSocket used by spike C)
 ```
 
@@ -75,7 +75,7 @@ node --version     # ≥ 22 (built-in WebSocket used by spike C)
 
 With Windows 11 Smart App Control **on**, the code-integrity policy refuses to run
 unsigned executables without cloud reputation — which is every build script, test
-binary and `pt-agent.exe` that `cargo` produces. Symptom (intermittent, a retry
+binary and `warpshot-agent.exe` that `cargo` produces. Symptom (intermittent, a retry
 sometimes passes):
 
 ```

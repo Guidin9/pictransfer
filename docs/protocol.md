@@ -1,4 +1,4 @@
-# pictransfer protocol — version 1
+# Warpshot protocol — version 1
 
 Status: **DRAFT** (Faz 0). Normative keywords MUST / SHOULD / MAY follow RFC 2119.
 Code follows this document. To change a wire format or a crypto step, change this
@@ -65,17 +65,17 @@ All secrets MUST be zeroized after use and MUST NOT be logged.
 
 | Label | Use |
 |---|---|
-| `pictransfer/record/v1\0` | membership record signature input prefix |
-| `pictransfer/record-id/v1\0` | record id hash prefix |
-| `pictransfer/server-auth/v1\0` | server request signature prefix |
-| `pictransfer/wake-sig/v1\0` | wake envelope sender signature prefix |
-| `pictransfer/wake-kdf/v1` | wake envelope HKDF `info` prefix |
-| `pictransfer/pair-proof/v1` | pairing proof HMAC message prefix |
-| `pictransfer/sas/v1` | short authentication string hash prefix |
-| `EXPORTER-pictransfer-pair-v1` | TLS exporter label, pairing |
-| `EXPORTER-pictransfer-xfer-v1` | TLS exporter label, transfer |
-| `pictransfer/xfer-transcript/v1\0` | transfer transcript hash prefix |
-| `pictransfer/xfer-kdf/v1 ` | transfer HKDF `info` prefix (note trailing space) |
+| `warpshot/record/v1\0` | membership record signature input prefix |
+| `warpshot/record-id/v1\0` | record id hash prefix |
+| `warpshot/server-auth/v1\0` | server request signature prefix |
+| `warpshot/wake-sig/v1\0` | wake envelope sender signature prefix |
+| `warpshot/wake-kdf/v1` | wake envelope HKDF `info` prefix |
+| `warpshot/pair-proof/v1` | pairing proof HMAC message prefix |
+| `warpshot/sas/v1` | short authentication string hash prefix |
+| `EXPORTER-warpshot-pair-v1` | TLS exporter label, pairing |
+| `EXPORTER-warpshot-xfer-v1` | TLS exporter label, transfer |
+| `warpshot/xfer-transcript/v1\0` | transfer transcript hash prefix |
+| `warpshot/xfer-kdf/v1 ` | transfer HKDF `info` prefix (note trailing space) |
 
 ## 3. Identities
 
@@ -120,8 +120,8 @@ RecordBody (CBOR map, encoded inside `body`):
   7: device     DeviceInfo      ; genesis, add, update
   8: reason     uint            ; remove only: 0 user, 1 lost-or-stolen, 2 left, 3 not-me
 
-sig       = Ed25519.Sign(IK_signer, "pictransfer/record/v1\0" ‖ body)
-record_id = SHA-256("pictransfer/record-id/v1\0" ‖ body ‖ signer ‖ sig)
+sig       = Ed25519.Sign(IK_signer, "warpshot/record/v1\0" ‖ body)
+record_id = SHA-256("warpshot/record-id/v1\0" ‖ body ‖ signer ‖ sig)
 ```
 
 ### 4.3 Validation (normative)
@@ -138,7 +138,7 @@ and head id `H`. Record `R` at position `n` is valid **iff all** hold:
    - `add`: `subject ∉ S`, `device` present. Re-adding a previously removed key is a new admission and is allowed.
    - `remove`: `subject ∈ S`. A member may remove itself (leave).
    - `update`: `signer == subject`, `device` present, `device.platform` unchanged (rename or KEM key rotation).
-5. `Ed25519.VerifyStrict(signer, "pictransfer/record/v1\0" ‖ body, sig)` succeeds.
+5. `Ed25519.VerifyStrict(signer, "warpshot/record/v1\0" ‖ body, sig)` succeeds.
 
 State transition: `genesis`/`add`/`update` set `S[subject] = device`; `remove`
 deletes `S[subject]`. When `S` becomes empty the group is dead and no further
@@ -177,7 +177,7 @@ on every member:
 with the action **"This wasn't me"**. That action appends `remove(subject, reason = 3)`
 and offers to remove the adder as well.
 
-## 5. Pairing (ALPN `pictransfer/pair/1`)
+## 5. Pairing (ALPN `warpshot/pair/1`)
 
 ### 5.1 Roles
 
@@ -187,7 +187,7 @@ phone) scans it. Either device may already belong to a group.
 ### 5.2 QR payload
 
 ```
-QR text = "PT1:" ‖ BASE32_NOPAD_UPPER(CBOR(QrPayload))   ; QR alphanumeric mode
+QR text = "WARP1:" ‖ BASE32_NOPAD_UPPER(CBOR(QrPayload))   ; QR alphanumeric mode
 
 QrPayload:
   0: v       uint = 1
@@ -208,9 +208,9 @@ are sufficient.
 
 1. The scanner dials `eid` using `dial`. It MUST abort unless `remote_id() == eid`.
 2. Both sides compute:
-   `ekm = export_keying_material(len 32, label "EXPORTER-pictransfer-pair-v1", context eid_display ‖ eid_scanner)`.
+   `ekm = export_keying_material(len 32, label "EXPORTER-warpshot-pair-v1", context eid_display ‖ eid_scanner)`.
 3. S → D `PairHello { 0: v=1, 1: device DeviceInfo, 2: proof bstr32, 3: group bstr16?, 4: head LogHead? }`
-   where `proof = HMAC-SHA-256(key = secret, msg = "pictransfer/pair-proof/v1" ‖ ekm ‖ eid_scanner)`.
+   where `proof = HMAC-SHA-256(key = secret, msg = "warpshot/pair-proof/v1" ‖ ekm ‖ eid_scanner)`.
 4. D checks, in this order:
    - The QR has not expired.
    - The secret is unused. D marks it used on the **first** attempt, whether that attempt succeeds or fails.
@@ -219,7 +219,7 @@ are sufficient.
    On any failure D closes with `PAIR_PROOF` or `PAIR_EXPIRED` and discards the QR.
 5. D → S `PairInfo { 0: device DeviceInfo, 1: group bstr16?, 2: head LogHead? }`.
 6. Both screens show the SAS: the first 6 characters of
-   `BASE32(SHA-256("pictransfer/sas/v1" ‖ ekm))`, formatted `XXX-XXX`, together
+   `BASE32(SHA-256("warpshot/sas/v1" ‖ ekm))`, formatted `XXX-XXX`, together
    with the other device's name and platform. **The user must confirm on both devices.**
    The confirmations are exchanged as `PairConfirm {}`. A refusal or a 120 s
    timeout closes with `PAIR_REJECTED`.
@@ -245,9 +245,9 @@ Base URL `SRV` is the build-time default or the value from the QR payload. HTTPS
 ### 6.1 Request authentication
 
 ```
-Authorization: PT1 id=<b64u EndpointId>, ts=<decimal ms>, sig=<b64u signature>
+Authorization: WARP1 id=<b64u EndpointId>, ts=<decimal ms>, sig=<b64u signature>
 
-signed = "pictransfer/server-auth/v1\0" ‖ METHOD ‖ "\n" ‖ PATH_AND_QUERY ‖ "\n"
+signed = "warpshot/server-auth/v1\0" ‖ METHOD ‖ "\n" ‖ PATH_AND_QUERY ‖ "\n"
          ‖ ts ‖ "\n" ‖ lowercase_hex(SHA-256(body))      ; empty body → SHA-256("")
 sig    = Ed25519.Sign(IK, signed)
 ```
@@ -260,7 +260,7 @@ The server MUST:
 
 **Operator admission (private deployments).** If the Worker secret
 `GROUP_CREATE_TOKEN` is set, `POST /v1/groups` MUST also carry
-`PT-Create-Token: <token>`. The server compares it with the secret in constant
+`Warpshot-Create-Token: <token>`. The server compares it with the secret in constant
 time and answers 403 `not-allowed` when it is missing or wrong, before any other
 processing. All other endpoints already require membership, so this restricts the
 whole deployment to the operator's groups. The token is not a key: a leak only
@@ -370,11 +370,11 @@ signed by the sender.
 Envelope = [ v: uint = 1, kid: bstr .size 8, ct_kem: bstr .size 1120, ct: bstr ]   ; CBOR array → b64u
 
 (ss, ct_kem) = XWing.Encaps(kem_pk_recipient)            ; kid = kid(kem_pk_recipient)
-k   = HKDF-SHA-256(salt = "", ikm = ss, info = "pictransfer/wake-kdf/v1" ‖ eid_recipient ‖ kid, L = 32)
+k   = HKDF-SHA-256(salt = "", ikm = ss, info = "warpshot/wake-kdf/v1" ‖ eid_recipient ‖ kid, L = 32)
 ct  = ChaCha20-Poly1305.Seal(k, nonce = 0^12, aad = u8(v) ‖ kid ‖ ct_kem, pt = CBOR(Sealed))
 
 Sealed = [ inner: bstr, sender: bstr .size 32, sig: bstr .size 64 ]
-sig    = Ed25519.Sign(IK_sender, "pictransfer/wake-sig/v1\0" ‖ eid_recipient ‖ inner)
+sig    = Ed25519.Sign(IK_sender, "warpshot/wake-sig/v1\0" ‖ eid_recipient ‖ inner)
 
 Inner (CBOR map inside `inner`):
   0: kind     uint            ; 1 connect, 2 group-changed
@@ -404,11 +404,11 @@ The recipient MUST, in order:
 
 ### 7.4 Actions
 
-- `connect`: within 10 s, dial `sender` at `dial` with ALPN `pictransfer/xfer/1`
+- `connect`: within 10 s, dial `sender` at `dial` with ALPN `warpshot/xfer/1`
   and present `session` (§8.3). On Android, start the foreground service first.
 - `group-changed`: sync the log from the server, validate it, and raise alerts (§4.6).
 
-## 8. Transfer protocol (ALPN `pictransfer/xfer/1`)
+## 8. Transfer protocol (ALPN `warpshot/xfer/1`)
 
 ### 8.1 Admission
 
@@ -440,13 +440,13 @@ L → D  HelloAck { 0: v=1, 1: ct bstr1120, 2: head LogHead, 3: caps [uint] }
 
 - `ek` is a fresh X-Wing encapsulation key. L computes `(ss, ct) = XWing.Encaps(ek)`.
   D computes `ss = XWing.Decaps(dk, ct)` and zeroizes `dk`.
-- `ekm = export_keying_material(len 32, label "EXPORTER-pictransfer-xfer-v1", context session)`.
-- `th = SHA-256("pictransfer/xfer-transcript/v1\0" ‖ u32be(|Hello|) ‖ Hello ‖ u32be(|HelloAck|) ‖ HelloAck ‖ eid_D ‖ eid_L)`,
+- `ekm = export_keying_material(len 32, label "EXPORTER-warpshot-xfer-v1", context session)`.
+- `th = SHA-256("warpshot/xfer-transcript/v1\0" ‖ u32be(|Hello|) ‖ Hello ‖ u32be(|HelloAck|) ‖ HelloAck ‖ eid_D ‖ eid_L)`,
   where `Hello` and `HelloAck` are the exact frame payload bytes.
 - `prk = HKDF-Extract(salt = ekm, ikm = ss)`.
 - Control keys:
-  - `k_ctrl_dl = HKDF-Expand(prk, "pictransfer/xfer-kdf/v1 ctrl d>l" ‖ th, 32)`
-  - `k_ctrl_ld = HKDF-Expand(prk, "pictransfer/xfer-kdf/v1 ctrl l>d" ‖ th, 32)`
+  - `k_ctrl_dl = HKDF-Expand(prk, "warpshot/xfer-kdf/v1 ctrl d>l" ‖ th, 32)`
+  - `k_ctrl_ld = HKDF-Expand(prk, "warpshot/xfer-kdf/v1 ctrl l>d" ‖ th, 32)`
 - An unsupported `v` closes with `VERSION`. If the heads differ, §8.5 runs before any `Offer`.
 
 Security rationale (non-normative):
@@ -509,7 +509,7 @@ admission (§8.1) is checked again.
   Plaintext chunks are 64 KiB, except the last (0–64 KiB). An empty item is one
   empty last chunk.
 - `dir` is the direction byte: `0x00` for d>l, `0x01` for l>d.
-- `k_item = HKDF-Expand(prk, "pictransfer/xfer-kdf/v1 item" ‖ u8(dir) ‖ u32be(id) ‖ th, 32)`.
+- `k_item = HKDF-Expand(prk, "warpshot/xfer-kdf/v1 item" ‖ u8(dir) ‖ u32be(id) ‖ th, 32)`.
 - `nonce = 0^7 ‖ u32be(chunk_index) ‖ u8(last)`, where `last` is 0x00 or 0x01
   (STREAM construction). `aad = u32be(id)`.
 - **Receiver procedure:**
@@ -545,7 +545,7 @@ admission (§8.1) is checked again.
 
 - **iroh `Endpoint` configuration:**
   - the device `SecretKey`;
-  - ALPNs `pictransfer/xfer/1` and `pictransfer/pair/1` (pair is rejected unless a pairing window is open);
+  - ALPNs `warpshot/xfer/1` and `warpshot/pair/1` (pair is rejected unless a pairing window is open);
   - a relay map with **one** region, chosen in Spike A. The home relay URL is then
     known in advance and can go into wake envelopes immediately;
   - **no address lookup** (no DNS/pkarr publishing, no mDNS). Addresses travel
@@ -579,7 +579,7 @@ admission (§8.1) is checked again.
 ## 11. Versioning
 
 Version markers are the ALPN suffix, record `v`, envelope `v`, `Hello.v`, the
-server path prefix `/v1`, and the QR prefix `PT1:`. Unknown CBOR map keys are
+server path prefix `/v1`, and the QR prefix `WARP1:`. Unknown CBOR map keys are
 ignored. There is no algorithm negotiation and therefore no downgrade surface. A
 breaking change gets a new version. Clients MAY support versions N and N−1 during
 a migration.
@@ -587,7 +587,7 @@ a migration.
 ## 12. Test vectors
 
 `docs/test-vectors/*.json` are generated by the core test suite from fixed seeds
-(`cargo test -p pt-core gen_vectors -- --ignored`). They are consumed by the core
+(`cargo test -p warpshot-core gen_vectors -- --ignored`). They are consumed by the core
 tests and by the server tests (TypeScript), so both implementations agree byte for byte:
 
 | File | Content |

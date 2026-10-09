@@ -1,6 +1,6 @@
 # Additional permission under GNU GPL version 3 section 7
 
-pictransfer is licensed under the GNU General Public License, version 3 or (at
+Warpshot is licensed under the GNU General Public License, version 3 or (at
 your option) any later version (see `LICENSE`).
 
 The Android app receives wake-up messages through Firebase Cloud Messaging,

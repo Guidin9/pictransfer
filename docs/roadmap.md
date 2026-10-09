@@ -16,14 +16,15 @@ connection (`docs/dev-setup.md`).
   `x86_64-pc-windows-msvc`; `cargo new` + `cargo run` works.
 - [ ] **F0-4** Accounts (user): Cloudflare (`npx wrangler login`); a Firebase
   project with the Android app and a service-account key.
-- [ ] **F0-5** Decide names: app name, Android `applicationId`, Worker name. Rename
-  the working name `pictransfer` if needed **before** any code ships.
+- [x] **F0-5** Decide names: app name **Warpshot** (formerly the working name
+  `pictransfer`), Android `applicationId` `io.github.guidin9.warpshot`, Worker
+  name `warpshot`. Binaries: `warpshot-agent.exe`, `warpshot-ui.exe`, `warpctl`.
 - [ ] **F0-6** `[DL]` Spike A — iroh on demand (`docs/spikes.md`).
 - [ ] **F0-7** `[DL]` Spike B — agent skeleton vs the idle budget; first row in
   `resource-budget.md` §4.
 - [ ] **F0-8** `[DL]` Spike C — DO keepalive. Set K in protocol §6.3.
 - [ ] **F0-9** `[DL]` Spike D — Android wake path on the user's phone.
-- [ ] **F0-10** ADR 0007, crate choices: X-Wing implementation, CBOR crate
+- [ ] **F0-10** ADR 0008, crate choices: X-Wing implementation, CBOR crate
   (`minicbor` vs `ciborium`, judged by strict-decoding support), SQLite binding.
 
 ## Faz 1 — MVP (personal use)
@@ -38,12 +39,12 @@ connection (`docs/dev-setup.md`).
 | C4 | Wake envelopes §7: seal/open, replay cache | `wake.json` vectors; every tamper case rejected |
 | C5 | Server client: §6.1 auth, REST, WebSocket (keepalive, backoff, resume) | `server-auth.json`; integration test against `wrangler dev` |
 | C6 | Endpoint manager: on-demand bind, 30 s idle teardown, single relay, no address lookup, direct-only policy | unit tests + spike A numbers reproduced |
-| C7 | Transfer §8: handshake and key schedule, control messages, item streams, BLAKE3, temp file + atomic rename, name sanitization | `xfer-keys.json`; ptctl E2E with text, image and a 1 GB file; relay-only and direct-only modes |
-| C8 | Pairing §5: QR encode/decode, SAS, group resolution table | `pair.json`; ptctl pairing E2E covering all 5 table rows |
+| C7 | Transfer §8: handshake and key schedule, control messages, item streams, BLAKE3, temp file + atomic rename, name sanitization | `xfer-keys.json`; warpctl E2E with text, image and a 1 GB file; relay-only and direct-only modes |
+| C8 | Pairing §5: QR encode/decode, SAS, group resolution table | `pair.json`; warpctl pairing E2E covering all 5 table rows |
 | C9 | Settings store and history store (encrypted fields) | tests; no plaintext names in the DB file |
 | C10 | Test-vector generator (`gen_vectors`) used by core and server | vectors reproducible from fixed seeds |
 
-### CLI (`crates/cli`, `ptctl`)
+### CLI (`crates/cli`, `warpctl`)
 
 | Id | Task | Acceptance |
 |---|---|---|
@@ -77,7 +78,7 @@ connection (`docs/dev-setup.md`).
 
 | Id | Task | Acceptance |
 |---|---|---|
-| U1 | Tauri v2 skeleton: no network capability, strict CSP, pipe client | `pt-ui` exits fully on close (no leftover WebView2 processes) |
+| U1 | Tauri v2 skeleton: no network capability, strict CSP, pipe client | `warpshot-ui` exits fully on close (no leftover WebView2 processes) |
 | U2 | Screens: pairing (QR, SAS, confirm), devices (rename/remove), settings (hotkey recorder with AltGr warning, target, folder, relay, autostart), history | manual walkthrough |
 
 ### Android (`apps/android`)
@@ -85,16 +86,16 @@ connection (`docs/dev-setup.md`).
 | Id | Task | Acceptance |
 |---|---|---|
 | A1 | Gradle project; Rust core via `cargo-ndk` + UniFFI; Keystore bridge | debug build on the phone |
-| A2 | Onboarding: QR scan, pairing confirmation, notification permission, battery guidance | pairs with ptctl and with the agent |
+| A2 | Onboarding: QR scan, pairing confirmation, notification permission, battery guidance | pairs with warpctl and with the agent |
 | A3 | FCM → `TransferService` (dataSync FGS) → receive → outputs (MediaStore, clipboard, notification, history) | delivery in Doze, < 3 s on Wi-Fi |
 | A4 | `ShareActivity` + sharing shortcuts (the PC appears directly in the share sheet) | share an image from Gallery → PC clipboard |
-| A5 | Devices (presence), settings, history; group alerts with "This wasn't me" | the alert appears when ptctl adds a device |
+| A5 | Devices (presence), settings, history; group alerts with "This wasn't me" | the alert appears when warpctl adds a device |
 
 ### End-to-end and personal release
 
 | Id | Task | Acceptance |
 |---|---|---|
-| E1 | `scripts/e2e-local.ps1`: `wrangler dev` + two `ptctl` peers | green locally and in CI |
+| E1 | `scripts/e2e-local.ps1`: `wrangler dev` + two `warpctl` peers | green locally and in CI |
 | E2 | Real-device checklists: `resource-budget.md`, `threat-model.md` §6, Spike D numbers | all checked |
 | E3 | CI (GitHub Actions): fmt, clippy, test, deny; server tests; Windows agent build + idle gate; Android assemble | green on `main` |
 

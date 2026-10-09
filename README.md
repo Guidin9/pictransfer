@@ -1,4 +1,4 @@
-# pictransfer *(working name)*
+# Warpshot
 
 Fast, end-to-end encrypted transfer of screenshots, text and files between your
 **Android phone** and your **Windows PC** — one hotkey, no window, no account.
@@ -12,7 +12,7 @@ Fast, end-to-end encrypted transfer of screenshots, text and files between your
   seconds later it is on your phone: in the gallery, on the clipboard, and in a
   notification with a preview.
 - **Phone → PC:** tap Share and pick your PC directly in the share sheet. The
-  item lands in your PC's clipboard and `Downloads\PicTransfer`.
+  item lands in your PC's clipboard and `Downloads\Warpshot`.
 - **See your devices** and whether they are online or can be woken up.
 
 ## Design highlights

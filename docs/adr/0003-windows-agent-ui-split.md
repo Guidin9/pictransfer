@@ -10,12 +10,12 @@ WebView2 are productive for the UI, but WebView2 costs tens of MB or more while 
 
 ## Decision
 
-- `pt-agent.exe`: pure Rust + Win32/WinRT, using `windows`, `tray-icon`, `muda`
+- `warpshot-agent.exe`: pure Rust + Win32/WinRT, using `windows`, `tray-icon`, `muda`
   and `global-hotkey`. Two threads: the message loop and a `current_thread` tokio
   runtime with the server WebSocket and the named-pipe IPC. The iroh endpoint
   exists only during transfers. No WebView, no Tauri. Budget: < 5 MB private
   working set, < 0.5 MB/day network (`docs/resource-budget.md`).
-- `pt-ui.exe`: Tauri v2 + React/TypeScript. It is started from the tray and exits
+- `warpshot-ui.exe`: Tauri v2 + React/TypeScript. It is started from the tray and exits
   when closed. It is stateless and talks to the agent via JSON-RPC over a named
   pipe whose ACL allows only the current user.
 

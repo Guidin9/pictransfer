@@ -1,13 +1,13 @@
 # Windows agent resource budget
 
-The user's explicit requirement: when idle in the background, `pt-agent.exe` must
+The user's explicit requirement: when idle in the background, `warpshot-agent.exe` must
 use as few resources as possible — RAM especially, and the network almost not at
 all. This budget is an **acceptance gate**. A change that breaks it does not merge.
 
 ## 1. Budget
 
 "Idle" means the agent has been running for at least 10 minutes since the last
-transfer or UI interaction, the network is connected, and `pt-ui.exe` is closed.
+transfer or UI interaction, the network is connected, and `warpshot-ui.exe` is closed.
 
 | Metric | Budget | How it is measured |
 |---|---|---|
@@ -23,7 +23,7 @@ Expected network at idle: one TLS WebSocket to Cloudflare with an app-level ping
 every 60–90 s, about 200 bytes per round trip including TCP/IP overhead, which
 comes to ≈ 0.2–0.3 MB/day. Spike C fixes K.
 
-## 2. Design rules for `pt-agent.exe`
+## 2. Design rules for `warpshot-agent.exe`
 
 1. **Two threads.** The Win32 message loop, plus one tokio `current_thread`
    runtime that holds the server WebSocket and the named-pipe listener. Nothing
@@ -56,14 +56,14 @@ comes to ≈ 0.2–0.3 MB/day. Spike C fixes K.
 
 ```powershell
 # After the agent has been idle ≥ 1 min; samples every 5 s for 10 min
-powershell -ExecutionPolicy Bypass -File scripts\measure-idle.ps1 -ProcessName pt-agent
+powershell -ExecutionPolicy Bypass -File scripts\measure-idle.ps1 -ProcessName warpshot-agent
 # Exit code 1 if over budget (used as a CI gate on the Windows runner)
 ```
 
 Network cross-check with `pktmon` (requires admin):
 
 ```powershell
-$rip = (Get-NetTCPConnection -OwningProcess (Get-Process pt-agent).Id -State Established).RemoteAddress
+$rip = (Get-NetTCPConnection -OwningProcess (Get-Process warpshot-agent).Id -State Established).RemoteAddress
 pktmon filter remove; pktmon filter add PT -i $rip
 pktmon start --capture --pkt-size 0 --file-name idle.etl   # wait 10 min
 pktmon stop; pktmon etl2txt idle.etl -o idle.txt         # sum the packet lengths
