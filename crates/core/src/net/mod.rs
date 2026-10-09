@@ -123,9 +123,14 @@ pub async fn bind(ik: &IdentityKey, relay: Relay) -> Result<Endpoint, NetError> 
         Some(u) => RelayMode::custom([u]),
         None => RelayMode::Disabled,
     };
+    let transport = iroh::endpoint::QuicTransportConfig::builder()
+        .default_path_max_idle_timeout(PATH_IDLE)
+        .default_path_keep_alive_interval(PATH_KEEPALIVE)
+        .build();
     let ep = Endpoint::builder(presets::Minimal)
         .secret_key(sk)
         .relay_mode(relay_mode)
+        .transport_config(transport)
         .clear_address_lookup()
         .alpns(vec![crate::xfer::ALPN.to_vec(), crate::pair::ALPN.to_vec()])
         .bind()
@@ -143,6 +148,17 @@ pub async fn bind(ik: &IdentityKey, relay: Relay) -> Result<Endpoint, NetError> 
 
 /// How long [`bind`] waits for the home relay connection.
 pub const RELAY_WAIT: Duration = Duration::from_secs(5);
+
+/// A path without packets for this long is abandoned and the connection moves
+/// to another path (normally the relay). iroh's default is 15 s: on a phone →
+/// PC transfer whose direct LAN path died right after the handshake (Windows
+/// "Public" network), the stream stalled ~20 s before falling back (measured
+/// 2026-10-09). If the last path goes idle the connection closes, so keep this
+/// well above the keep-alive interval.
+pub const PATH_IDLE: Duration = Duration::from_secs(4);
+/// Per-path keep-alive while a connection is open (endpoints exist only during
+/// transfers, so this costs nothing at idle).
+pub const PATH_KEEPALIVE: Duration = Duration::from_secs(1);
 
 /// Our dial info: the configured relay plus current direct addresses.
 pub fn dial_info(ep: &Endpoint) -> DialInfo {
