@@ -15,6 +15,7 @@ group, and a $0 Cloudflare wake-up server.
 | `docs/protocol.md` | **normative** wire and crypto spec. Change the spec and test vectors first, then the code |
 | `docs/threat-model.md` | what we defend against. Security-relevant changes must keep it true |
 | `docs/resource-budget.md` | Windows agent idle budget — an acceptance gate |
+| `docs/ipc.md` | agent ⇄ UI named-pipe protocol |
 | `docs/adr/` | decisions and their reasons. Don't re-litigate without new facts; write a new ADR instead |
 | `docs/spikes.md` | Faz 0 measurements that the plan depends on |
 | `docs/roadmap.md` | task list with acceptance criteria — pick the next unchecked task; tick it when its acceptance passes |
