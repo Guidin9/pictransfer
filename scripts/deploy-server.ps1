@@ -8,7 +8,8 @@
 param(
     [string]$FcmKey = ""
 )
-$ErrorActionPreference = "Stop"
+# Native tools write notices to stderr; failures are checked via $LASTEXITCODE.
+$ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
 $cfgDir = Join-Path $env:LOCALAPPDATA "Warpshot"
 $cfgPath = Join-Path $cfgDir "config.json"
@@ -16,7 +17,8 @@ New-Item -ItemType Directory -Force $cfgDir | Out-Null
 
 Push-Location (Join-Path $root "server")
 try {
-    $out = (npx wrangler deploy 2>&1 | Out-String)
+    # Through cmd so npm's stderr notices don't become PowerShell 5.1 errors.
+    $out = (cmd /c "npx wrangler deploy 2>&1" | Out-String)
     Write-Host $out
     if ($LASTEXITCODE -ne 0) { throw "wrangler deploy failed" }
     $m = [regex]::Match($out, "https://[A-Za-z0-9.-]+\.workers\.dev")
@@ -34,11 +36,11 @@ try {
         [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
         $token = [Convert]::ToBase64String($bytes).TrimEnd("=").Replace("+", "-").Replace("/", "_")
     }
-    $token | npx wrangler secret put GROUP_CREATE_TOKEN
+    $token | npx.cmd wrangler secret put GROUP_CREATE_TOKEN
     if ($LASTEXITCODE -ne 0) { throw "setting GROUP_CREATE_TOKEN failed" }
 
     if ($FcmKey) {
-        Get-Content $FcmKey -Raw | npx wrangler secret put FCM_SERVICE_ACCOUNT
+        Get-Content $FcmKey -Raw | npx.cmd wrangler secret put FCM_SERVICE_ACCOUNT
         if ($LASTEXITCODE -ne 0) { throw "setting FCM_SERVICE_ACCOUNT failed" }
     }
 } finally {
