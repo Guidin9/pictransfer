@@ -3243,7 +3243,10 @@ dependencies = [
 name = "warpctl"
 version = "0.1.0"
 dependencies = [
+ "iroh",
+ "tokio",
  "warpshot-core",
+ "zeroize",
 ]
 
 [[package]]
