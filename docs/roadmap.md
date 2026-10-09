@@ -124,3 +124,38 @@ external audit.
    LAN (direct path); iroh transient threads after transfers; delete the
    orphaned first Firebase key; redeploy the server (BOM-tolerant FCM
    parse); push to GitHub.
+
+## Security testing (attack our own app) — before wider use
+
+Attack surface today: no listening port at idle on either device (outbound
+WebSocket only); the iroh UDP endpoint exists only during a transfer and
+admits only verified group members; the named pipe is current-user only;
+received files are saved with MOTW and never opened. Each item below gets a
+written result in `docs/threat-model.md` §6.
+
+1. **Port/exposure scan:** nmap (TCP+UDP) against PC and phone at idle and
+   during a transfer; confirm nothing answers a non-member.
+2. **Malicious peer:** a hostile `warpctl` variant that is (a) not a member,
+   (b) a removed member, (c) a member sending bad frames: path traversal and
+   reserved names, oversize/lying sizes, wrong BLAKE3, endless streams,
+   replayed sessions, flood of connections. Expect refusal, no file written,
+   no crash, bounded memory.
+3. **Wake abuse:** replayed/forged/expired envelopes, wakes from non-members,
+   FCM messages not from our server; the phone must stay silent and never
+   dial an attacker-chosen address for an invalid envelope.
+4. **Pairing:** expired/reused QR, wrong proof, SAS mismatch, a second
+   scanner racing the first.
+5. **Server API:** unauthenticated and replayed requests, other groups'
+   ids, rate limits, oversized bodies, log CAS races, push-token theft;
+   a compromised server must not be able to add members or read content.
+6. **Local:** pipe access from another Windows user and from a non-owner
+   pipe squatter; what a same-user process can do through the pipe
+   (e.g. `send.files` of arbitrary paths) — decide on a confirmation.
+7. **Android:** exported components (`ShareActivity` takes any share,
+   `PushService`/`TransferService` not exported), MobSF static scan,
+   Keystore extraction attempt on a rooted test device, clipboard leaks.
+8. **Traffic check:** Wireshark/pktmon capture: no plaintext content, names
+   or addresses to the server or FCM.
+9. **Fuzzing + supply chain:** extend fuzz targets to every decoder
+   (xfer frames, wake, pair, server JSON); `cargo deny`, `npm audit`,
+   dependency review; later an external audit (Faz 3).
