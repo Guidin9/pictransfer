@@ -56,3 +56,7 @@ desktop.ini
 *.local.jsonc
 *.local.properties
 local.properties
+
+# Android: generated Rust library and UniFFI bindings (apps/android/build-rust.ps1)
+apps/android/app/src/main/jniLibs/
+apps/android/app/src/main/java/uniffi/

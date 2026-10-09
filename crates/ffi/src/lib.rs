@@ -115,6 +115,13 @@ pub struct OutgoingFile {
     pub path: String,
 }
 
+/// The server URL carried in a pairing QR code (needed before [`Warpshot::open`]
+/// on a fresh install), or `None` if the text is not a valid code or has none.
+#[uniffi::export]
+pub fn qr_server_url(qr_text: String) -> Option<String> {
+    QrPayload::parse(qr_text.trim()).ok().and_then(|q| q.server)
+}
+
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }

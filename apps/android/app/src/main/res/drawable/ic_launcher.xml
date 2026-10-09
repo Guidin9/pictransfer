@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A simple arrow-through-frame mark until a real icon exists. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp"
+    android:viewportWidth="48" android:viewportHeight="48">
+    <path android:fillColor="#3D5AFE" android:pathData="M24,2a22,22 0,1 1,0 44a22,22 0,1 1,0 -44z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M13,16h14v4h-10v8h10v4h-14z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M25,19l11,5l-11,5z" />
+</vector>
