@@ -132,6 +132,12 @@ external audit.
 
 ## Security testing (attack our own app) — before wider use
 
+Mode (user, 2026-10-10): as aggressive as possible, white-box, against our
+own targets only: the user's PC and phone, our Worker, our Firebase project.
+Load tests stay inside our own Worker's free-tier quota; third-party
+infrastructure (n0 public relays, FCM, Cloudflare edge) is not flooded —
+use `wrangler dev` / a local relay for volume tests.
+
 Attack surface today: no listening port at idle on either device (outbound
 WebSocket only); the iroh UDP endpoint exists only during a transfer and
 admits only verified group members; the named pipe is current-user only;
