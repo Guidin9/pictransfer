@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = ["crates/core"]
+# Spikes are throwaway standalone crates; the server is TypeScript.
+exclude = ["spikes", "server"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/Guidin9/warpshot"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+# Security invariant (CLAUDE.md): no unwrap/expect/unchecked indexing on
+# network or disk data in library code. Tests opt out locally.
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+arithmetic_side_effects = "warn"
+
+# docs/resource-budget.md §2.10
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Crypto-heavy tests are slow unoptimized; optimize dependencies only.
+[profile.dev.package."*"]
+opt-level = 2

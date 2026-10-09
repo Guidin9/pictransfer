@@ -89,10 +89,11 @@ All secrets MUST be zeroized after use and MUST NOT be logged.
   | Key | Field | Type | Rules |
   |---|---|---|---|
   | 0 | `name` | tstr | 1–64 bytes UTF-8, no control characters |
-  | 1 | `platform` | uint | 1 = windows, 2 = android (others reserved) |
+  | 1 | `platform` | uint | 1 = windows, 2 = android; other values are reserved for new platforms. Receivers MUST accept them (shown as "other") so a newer member never breaks an older client's log. 0 is invalid. |
   | 2 | `kem_pk` | bstr | exactly 1216 bytes (X-Wing encapsulation key) |
   | 3 | `app` | tstr | ≤ 32 bytes, app version, informational |
 
+- Unknown `DeviceInfo` keys are ignored; missing `name`, `platform` or `kem_pk` is invalid.
 - `kid(kem_pk)` = first 8 bytes of `SHA-256(kem_pk)`.
 - `LogHead` = `{ 0: seq uint, 1: id bstr .size 32 }`.
 - `DialInfo` = `{ 0: relay tstr (optional), 1: [ tstr "ip:port" ] (≤ 8 entries) }`.
@@ -132,7 +133,10 @@ record_id = SHA-256("warpshot/record-id/v1\0" ‖ body ‖ signer ‖ sig)
 Let records `0..n-1` be validated, with state `S` (a map `EndpointId → DeviceInfo`)
 and head id `H`. Record `R` at position `n` is valid **iff all** hold:
 
-1. `R` decodes per §4.2 within the limits; `v == 1`; `group_id` is the group's id; `seq == n`.
+1. `R` decodes per §4.2 within the limits (a `SignedRecord` ≤ 4 KiB); `v == 1`;
+   `group_id` is the group's id; `seq == n`; `op ≤ 3`. Field presence by `op`:
+   `device` present for genesis/add/update and absent for remove; `reason`
+   present (0–3) for remove and absent otherwise.
 2. If `n == 0`: `op == genesis`, `prev` absent, `signer == subject`, `device` present.
    If `n > 0`: `prev == H`, `op ∈ {add, remove, update}`, `signer ∈ S`.
 3. `created_at ≤ now + 10 min`, and for `n > 0` also `created_at ≥ created_at(n-1) − 10 min`.
@@ -145,7 +149,8 @@ and head id `H`. Record `R` at position `n` is valid **iff all** hold:
 
 State transition: `genesis`/`add`/`update` set `S[subject] = device`; `remove`
 deletes `S[subject]`. When `S` becomes empty the group is dead and no further
-record is valid. Limits: at most 16 members and 1024 records (§10).
+record is valid. Limits: at most 16 members and 1024 records (§10); an `add`
+that would make a 17th member is invalid.
 
 ### 4.4 Appending
 

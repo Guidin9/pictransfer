@@ -1,0 +1,180 @@
+{
+  "cases": [
+    {
+      "error": "NonShortest",
+      "hex": "1817",
+      "name": "non-shortest uint (1 byte for 23)"
+    },
+    {
+      "error": "NonShortest",
+      "hex": "1900ff",
+      "name": "non-shortest uint (2 bytes for 255)"
+    },
+    {
+      "error": "NonShortest",
+      "hex": "1a0000ffff",
+      "name": "non-shortest uint (4 bytes)"
+    },
+    {
+      "error": "NonShortest",
+      "hex": "1b00000000ffffffff",
+      "name": "non-shortest uint (8 bytes)"
+    },
+    {
+      "error": "NonShortest",
+      "hex": "580100",
+      "name": "non-shortest bstr length"
+    },
+    {
+      "error": "NonShortest",
+      "hex": "98020102",
+      "name": "non-shortest array length"
+    },
+    {
+      "error": "NonShortest",
+      "hex": "a1180101",
+      "name": "non-shortest map key"
+    },
+    {
+      "error": "Indefinite",
+      "hex": "5f4101ff",
+      "name": "indefinite bstr"
+    },
+    {
+      "error": "Indefinite",
+      "hex": "7f6161ff",
+      "name": "indefinite tstr"
+    },
+    {
+      "error": "Indefinite",
+      "hex": "9f01ff",
+      "name": "indefinite array"
+    },
+    {
+      "error": "Indefinite",
+      "hex": "bf0101ff",
+      "name": "indefinite map"
+    },
+    {
+      "error": "Indefinite",
+      "hex": "ff",
+      "name": "stray break"
+    },
+    {
+      "error": "Reserved",
+      "hex": "1c",
+      "name": "reserved additional info 28"
+    },
+    {
+      "error": "Unsupported",
+      "hex": "20",
+      "name": "negative integer"
+    },
+    {
+      "error": "Unsupported",
+      "hex": "c11a514b67b0",
+      "name": "tag"
+    },
+    {
+      "error": "Unsupported",
+      "hex": "f6",
+      "name": "null"
+    },
+    {
+      "error": "Unsupported",
+      "hex": "f7",
+      "name": "undefined"
+    },
+    {
+      "error": "Unsupported",
+      "hex": "f90000",
+      "name": "half float"
+    },
+    {
+      "error": "Unsupported",
+      "hex": "fa47c35000",
+      "name": "single float"
+    },
+    {
+      "error": "Unsupported",
+      "hex": "fb3ff199999999999a",
+      "name": "double float"
+    },
+    {
+      "error": "Unsupported",
+      "hex": "f0",
+      "name": "simple value 16"
+    },
+    {
+      "error": "DuplicateKey",
+      "hex": "a201020103",
+      "name": "duplicate map key"
+    },
+    {
+      "error": "UnsortedKeys",
+      "hex": "a203040102",
+      "name": "unsorted map keys"
+    },
+    {
+      "error": "NonUintKey",
+      "hex": "a1616101",
+      "name": "text map key"
+    },
+    {
+      "error": "NonUintKey",
+      "hex": "a12001",
+      "name": "negative map key"
+    },
+    {
+      "error": "InvalidUtf8",
+      "hex": "62c328",
+      "name": "invalid utf-8"
+    },
+    {
+      "error": "InvalidUtf8",
+      "hex": "63eda080",
+      "name": "utf-8 surrogate"
+    },
+    {
+      "error": "Truncated",
+      "hex": "",
+      "name": "empty input"
+    },
+    {
+      "error": "Truncated",
+      "hex": "1a0001",
+      "name": "truncated uint"
+    },
+    {
+      "error": "Truncated",
+      "hex": "4401",
+      "name": "truncated bstr"
+    },
+    {
+      "error": "Truncated",
+      "hex": "830102",
+      "name": "truncated array"
+    },
+    {
+      "error": "Truncated",
+      "hex": "9b0000000100000000",
+      "name": "huge declared array length"
+    },
+    {
+      "error": "Truncated",
+      "hex": "5bffffffffffffffff",
+      "name": "huge declared bstr length"
+    },
+    {
+      "error": "TrailingBytes",
+      "hex": "0000",
+      "name": "trailing bytes"
+    },
+    {
+      "error": "TooDeep",
+      "hex": "818181818181818100",
+      "name": "nesting depth 9"
+    }
+  ],
+  "description": "Inputs a strict decoder MUST reject (protocol §1). max_depth = 8. 'error' names the rule (informational)."
+}
