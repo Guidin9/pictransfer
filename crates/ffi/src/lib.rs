@@ -160,6 +160,20 @@ impl std::fmt::Debug for Warpshot {
 }
 
 impl Warpshot {
+    /// Runs the in-band log sync (§8.5) and persists the log if it changed.
+    async fn sync_session(
+        &self,
+        s: &mut nx::Session,
+        log: &mut warpshot_core::log::Log,
+    ) -> Result<(), WarpError> {
+        if s.sync_logs(log, now_ms()).await? {
+            let mut dev = self.dev.lock().await;
+            dev.log = Some(log.clone());
+            self.save(&dev).await?;
+        }
+        Ok(())
+    }
+
     async fn save(&self, dev: &Device) -> Result<(), WarpError> {
         dev.save(&self.dir, &self.ks)
             .map_err(|_| WarpError::Storage)
@@ -426,7 +440,10 @@ impl Warpshot {
                     .log
                     .clone()
                     .ok_or(WarpError::NotPaired)?;
-                let s = flow::answer_connect(&ep, &log, &sender, session, &dial).await?;
+                let mut log = log;
+                let mut s = flow::answer_connect(&ep, &log, &sender, session, &dial).await?;
+                // §8.5: both peers run the log sync step before any transfer.
+                self.sync_session(&mut s, &mut log).await?;
                 let policy = Policy {
                     dir: PathBuf::from(inbox_dir),
                     max_size: 500 << 20,
@@ -480,7 +497,7 @@ impl Warpshot {
 impl Warpshot {
     async fn send(&self, target: String, items: Vec<OutItem>) -> Result<(), WarpError> {
         let target = parse_id(&target)?;
-        if items.iter().any(|o| matches!(o.source, Source::Bytes(_))) {
+        if items.is_empty() || items.iter().any(|o| matches!(o.source, Source::Bytes(_))) {
             return Err(WarpError::Invalid);
         }
         let (ep, _lease) = self.mgr.acquire().await?;
@@ -519,11 +536,14 @@ impl Warpshot {
                 net::close(&conn, warpshot_core::xfer::code::PROTOCOL);
                 continue;
             }
-            let s = nx::accept(&ep, conn, &log).await?;
+            let mut s = nx::accept(&ep, conn, &log).await?;
             let Some(p) = self.pending.lock().await.take(&s.hello_session, &s.peer) else {
                 net::close(&s.conn, warpshot_core::xfer::code::PROTOCOL);
                 continue;
             };
+            // §8.5: both peers run the log sync step before any transfer.
+            let mut synced = log.clone();
+            self.sync_session(&mut s, &mut synced).await?;
             let results = tokio::time::timeout(Duration::from_secs(3600), s.send_items(p.items))
                 .await
                 .map_err(|_| WarpError::Network {

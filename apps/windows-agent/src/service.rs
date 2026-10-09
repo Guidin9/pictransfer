@@ -416,7 +416,9 @@ impl Service {
         let _ = dev.save(&self.dir, &self.ks);
     }
 
-    fn set_server(&self, state: &'static str) {
+    /// Records the server state and sends the full `status` event (docs/ipc.md:
+    /// same shape as the `status` result; the UI replaces its state with it).
+    async fn set_server(&self, state: &'static str) {
         let changed = {
             let mut s = lk(&self.server_state);
             let c = *s != state;
@@ -424,7 +426,7 @@ impl Service {
             c
         };
         if changed {
-            let st = json!({"server": state});
+            let st = self.status().await;
             self.emit("status", st);
         }
     }
@@ -497,21 +499,21 @@ impl Service {
         let (h, mut rx) = client.websocket(gid, WsConfig::default());
         *ws = Some(h);
         drop(ws);
-        self.set_server("connecting");
+        self.set_server("connecting").await;
         let this = Arc::clone(self);
         tokio::spawn(async move {
             while let Some(ev) = rx.recv().await {
                 this.on_ws_event(ev).await;
             }
             *this.ws.lock().await = None;
-            this.set_server("offline");
+            this.set_server("offline").await;
         });
     }
 
     async fn on_ws_event(self: &Arc<Self>, ev: Event) {
         match ev {
             Event::Connected => {
-                self.set_server("connected");
+                self.set_server("connected").await;
                 let after = self
                     .dev
                     .lock()
@@ -525,7 +527,7 @@ impl Service {
                 }
                 power::trim_working_set();
             }
-            Event::Disconnected(_) | Event::ConnectFailed(_) => self.set_server("connecting"),
+            Event::Disconnected(_) | Event::ConnectFailed(_) => self.set_server("connecting").await,
             Event::Wake { env } => {
                 let this = Arc::clone(self);
                 tokio::spawn(async move { this.handle_wake(env).await });
@@ -550,7 +552,7 @@ impl Service {
                 self.refresh_menu().await;
             }
             Event::Log { records, head, .. } => self.apply_log(records, head).await,
-            Event::Bye { .. } | Event::Ended(_) => self.set_server("offline"),
+            Event::Bye { .. } | Event::Ended(_) => self.set_server("offline").await,
             Event::Err { id: None, .. } => {}
         }
     }
@@ -564,20 +566,31 @@ impl Service {
         match net::server::apply(&mut log, &records, &head, now_ms()) {
             Ok(true) => {
                 let me = dev.id();
-                let added: Vec<(EndpointId, String, u64)> = log
+                // (id, name, platform, name of the member who signed the add)
+                let added: Vec<(EndpointId, String, u64, String)> = log
                     .members()
                     .iter()
                     .filter(|(id, _)| **id != me && !before.contains(id))
-                    .map(|(id, d)| (*id, d.name.clone(), d.platform))
+                    .map(|(id, d)| {
+                        let by = log
+                            .records()
+                            .iter()
+                            .rev()
+                            .find(|r| r.body.subject == *id && matches!(r.body.op, Op::Add(_)))
+                            .and_then(|r| log.members().get(&r.signer))
+                            .map(|m| m.name.clone())
+                            .unwrap_or_default();
+                        (*id, d.name.clone(), d.platform, by)
+                    })
                     .collect();
                 let local_seq = log.head().map(|h| h.seq).unwrap_or_default();
                 dev.log = Some(log);
                 self.save(&dev);
                 drop(dev);
-                for (id, name, p) in added {
+                for (id, name, p, by) in added {
                     self.emit(
                         "group.alert",
-                        json!({"kind": "device-added", "id": hex(&id.0), "name": name, "platform": platform_str(p)}),
+                        json!({"kind": "device-added", "id": hex(&id.0), "name": name, "platform": platform_str(p), "by_name": by}),
                     );
                     self.toast(
                         "New device in your Warpshot group",
@@ -811,6 +824,11 @@ impl Service {
             }
         }
         self.emit("history.changed", json!({}));
+        let n = self.next_transfer.fetch_add(1, Ordering::Relaxed);
+        self.emit(
+            "transfer.done",
+            json!({"transfer": n.to_string(), "ok": true}),
+        );
         power::trim_working_set();
     }
 
@@ -910,13 +928,23 @@ impl Service {
                 net::close(&conn, wx::code::PROTOCOL);
                 continue;
             }
-            let Ok(s) = nx::accept(&ep, conn, &log).await else {
+            let Ok(mut s) = nx::accept(&ep, conn, &log).await else {
                 continue;
             };
             let Some(p) = self.pending.lock().await.take(&s.hello_session, &s.peer) else {
                 net::close(&s.conn, wx::code::PROTOCOL);
                 continue;
             };
+            // §8.5: both peers run the log sync step before any transfer.
+            let mut synced = log.clone();
+            if s.sync_logs(&mut synced, now_ms())
+                .await
+                .map_err(|e| net_code(&e))?
+            {
+                let mut dev = self.dev.lock().await;
+                dev.log = Some(synced);
+                self.save(&dev);
+            }
             let sent: Vec<Item> = p.items.iter().map(|o| o.item.clone()).collect();
             let results = tokio::time::timeout(Duration::from_secs(3600), s.send_items(p.items))
                 .await

@@ -54,6 +54,15 @@ class ShareActivity : ComponentActivity() {
         if (savedInstanceState == null) lifecycleScope.launch { send(intent) }
     }
 
+    /** A new share while this one is still on screen (singleTop or reused task). */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        done = false
+        state = "Preparing…"
+        lifecycleScope.launch { send(intent) }
+    }
+
     private suspend fun send(intent: Intent) {
         val core = Core.get(this)
         val pc = core?.let { c -> runCatching { c.devices() }.getOrNull()?.firstOrNull { !it.me } }
@@ -69,6 +78,10 @@ class ShareActivity : ComponentActivity() {
                 core.sendText(pc.id, text)
             } else if (uris.isNotEmpty()) {
                 val files = withContext(Dispatchers.IO) { uris.mapNotNull { copyToCache(it) } }
+                if (files.isEmpty()) {
+                    finishWith("Couldn't read the shared item.")
+                    return
+                }
                 try {
                     core.sendFiles(pc.id, files.map { OutgoingFile(it.path) })
                 } finally {

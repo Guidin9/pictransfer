@@ -137,6 +137,12 @@ try {
   const me = devs.find((x) => x.me).id;
   await sleep(1500); // the agent's WebSocket connects after pairing
 
+  // Diverge the logs: the PC appends an `update` record the phone hasn't seen.
+  // Every transfer must then run the in-band log sync on both sides.
+  await rpc("devices.rename", { name: "E2E PC" });
+  const renamed = (await rpc("devices.list")).find((x) => x.me);
+  check("devices.rename", renamed.name === "E2E PC");
+
   // Phone → PC: text, then an image file.
   let r = phone("send-text", me, "hello from the phone");
   check("phone → PC text", r.ok, r.out.trim());
@@ -151,8 +157,14 @@ try {
     motw = fs.readFileSync(path.join(recvDir, "shot.png:Zone.Identifier"), "utf8").includes("ZoneId=3");
   } catch {}
   check("Mark-of-the-Web", motw);
+  // A multi-chunk file (real screenshots are megabytes).
+  const big = path.join(tmp, "big.bin");
+  fs.writeFileSync(big, Buffer.from(Array.from({ length: 5 << 20 }, (_, i) => (i * 7919) & 255)));
+  r = phone("send-file", me, big);
+  const bigOut = path.join(recvDir, "big.bin");
+  check("phone → PC 5 MB file", r.ok && fs.existsSync(bigOut) && fs.statSync(bigOut).size === 5 << 20, r.out.trim());
   const hist = await rpc("history.list", { limit: 10 });
-  check("history has 2 incoming", hist.filter((h) => h.direction === "in").length === 2, hist.map((h) => h.kind).join(","));
+  check("history has 3 incoming", hist.filter((h) => h.direction === "in").length === 3, hist.map((h) => h.kind).join(","));
 
   // PC → phone: the simulated phone has no WebSocket and no push token → offline.
   const tdone = waitEvent("transfer.done");
