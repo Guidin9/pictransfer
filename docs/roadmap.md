@@ -106,3 +106,21 @@ See [`architecture.md`](architecture.md) §11 for the planned extensions.
 Faz 3 (public release) adds code signing (SignPath Foundation), the Play Store,
 a self-host option, TPM keys, UnifiedPush/F-Droid, reproducible builds and an
 external audit.
+
+## Next session (from the user's testing, 2026-10-10)
+
+1. **Mobile UI redesign** (Compose): onboarding, paired screen, share sheet card.
+2. **Hotkey feedback on the PC:** Ctrl+Alt+Z gives no visible feedback; the
+   phone notifies ~2.5–3 s later. Show an immediate "Sending to …" state
+   (toast and/or tray icon) and the result; check why the "Sent" toast
+   (`service.rs` `send_and_report`) doesn't appear.
+3. **Progress bar for sends** (phone share sheet first, PC too): bytes sent /
+   total and speed, so a 250 MB video shows it's moving. Needs per-chunk
+   progress from `net::xfer` → FFI callback → Kotlin; agent emits
+   `transfer.progress` (docs/ipc.md).
+4. **Tray icon has no logo** (shows blank in hidden icons): load a real
+   icon resource in `tray.rs`, embed it in the exe.
+5. Open: Doze/locked-phone delivery test; optional Windows firewall rule for
+   LAN (direct path); iroh transient threads after transfers; delete the
+   orphaned first Firebase key; redeploy the server (BOM-tolerant FCM
+   parse); push to GitHub.
