@@ -54,7 +54,7 @@ connection (`docs/dev-setup.md`).
 | Id | Task | Acceptance |
 |---|---|---|
 | S1 | Worker router + DO skeleton (SQLite schema, Hibernation API, auto-response) | vitest (workers pool) |
-| S2 | §6.1 auth + replay cache (WebCrypto Ed25519) | `server-auth.json` vectors |
+| S2 | §6.1 auth + replay cache (WebCrypto Ed25519) + operator admission token | `server-auth.json` vectors; group creation without/with a wrong token → 403 `not-allowed` |
 | S3 | Log store: §4.3 validation + CAS + `log` push | `record.json` vectors shared with core |
 | S4 | Wake routing (WS, else FCM HTTP v1 with cached OAuth token), rate limits | tests with a fake FCM endpoint |
 | S5 | Presence, push-token endpoints, removal handling (`bye`, token deletion) | tests |

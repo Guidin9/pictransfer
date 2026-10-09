@@ -258,6 +258,15 @@ The server MUST:
 - verify `sig` strictly;
 - require `id ∈` its member set. The exception is `POST /v1/groups`, where `id` MUST be the genesis signer.
 
+**Operator admission (private deployments).** If the Worker secret
+`GROUP_CREATE_TOKEN` is set, `POST /v1/groups` MUST also carry
+`PT-Create-Token: <token>`. The server compares it with the secret in constant
+time and answers 403 `not-allowed` when it is missing or wrong, before any other
+processing. All other endpoints already require membership, so this restricts the
+whole deployment to the operator's groups. The token is not a key: a leak only
+allows creating new groups (quota abuse), never access to existing ones. Clients
+take it from build-time deployment config that is not committed (ADR 0007).
+
 ### 6.2 Endpoints
 
 | Method | Path | Request body | Responses |
@@ -339,7 +348,7 @@ threat model).
 Responses use `{"error": code}`. Codes by HTTP status:
 - 400 `bad-request`
 - 401 `unauthenticated`
-- 403 `not-member`
+- 403 `not-member`, `not-allowed`
 - 404 `no-group`
 - 409 `head-moved`, `exists`
 - 413 `too-large`
