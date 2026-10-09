@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege (threat model T11); actions pinned by commit SHA.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: rustup toolchain install stable --profile minimal -c clippy -c rustfmt && rustup default stable
+      - name: fmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: test
+        run: cargo test --workspace --locked
+      - name: e2e (two warpctl processes)
+        shell: powershell
+        run: powershell -ExecutionPolicy Bypass -File scripts\e2e-local.ps1
+
+  rust-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: rustup toolchain install stable --profile minimal -c clippy && rustup default stable
+      - name: core tests
+        run: cargo test -p warpshot-core --locked
+      - name: CBOR fuzz (60 s)
+        run: WARPSHOT_FUZZ_SECS=60 cargo test -p warpshot-core --release --locked fuzz_long -- --ignored
+      - name: cargo-deny
+        run: |
+          cargo install cargo-deny --version 0.20.2 --locked
+          cargo deny check
+
+  server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: lts/*
+      - run: npm ci --ignore-scripts
+      - run: npx tsc --noEmit
+      - run: npm test
