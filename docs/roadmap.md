@@ -120,6 +120,14 @@ external audit.
    `transfer.progress` (docs/ipc.md).
 4. **Tray icon has no logo** (shows blank in hidden icons): load a real
    icon resource in `tray.rs`, embed it in the exe.
+4b. **Active transfers view + cancel (both platforms):** a long send (video,
+   Android → PC) keeps running silently in the background after leaving the
+   share card, using data, with no way to see or stop it. Needed: an ongoing
+   notification on Android with progress and a Cancel action (run sends in a
+   foreground service, not the share activity); an "Active transfers" section
+   in the Windows UI and tray with progress and Cancel; cancellation in core
+   (`net::xfer` aborts the stream, closes with a cancel code, cleans temp
+   files on the receiver) exposed via FFI and `transfer.cancel` (docs/ipc.md).
 5. **Windows UI history bug:** the "Klasörde göster" (reveal in folder)
    button overlaps the text behind it in the history list; fix the layout.
 6. **Security tests for key theft:** stolen-key scenario, revocation
