@@ -203,6 +203,11 @@ where
         close(&conn, e.close_code());
         return Err(e);
     }
+    // §5.3 step 4: different groups end here, before any SAS is shown.
+    if resolve(dev.group_id(), hello.group) == Resolution::OtherGroup {
+        close(&conn, code::PAIR_OTHER_GROUP);
+        return Err(NetError::Closed(code::PAIR_OTHER_GROUP));
+    }
     write_frame(
         &mut send,
         &PairInfo {
@@ -285,10 +290,7 @@ where
     let info = PairInfo::parse(
         &read_frame(&mut recv, MAX_MSG, HANDSHAKE_TIMEOUT)
             .await
-            .map_err(|e| match e {
-                NetError::Stream(_) => NetError::Closed(code::PAIR_PROOF),
-                e => e,
-            })?,
+            .map_err(|e| super::explain(&conn, e))?,
     )?;
     confirm_both(
         &mut send,

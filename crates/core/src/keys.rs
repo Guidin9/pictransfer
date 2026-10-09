@@ -174,33 +174,49 @@ pub trait Keystore {
     fn unwrap(&self, label: &str, wrapped: &[u8]) -> Result<Zeroizing<Vec<u8>>, KeyError>;
 }
 
-/// Both device keys.
-#[derive(Debug)]
+/// The device keys: identity, KEM and the history-encryption key.
 pub struct DeviceKeys {
     pub ik: IdentityKey,
     pub kk: KemKey,
+    pub hk: Zeroizing<[u8; 32]>,
+}
+
+impl fmt::Debug for DeviceKeys {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "DeviceKeys({:?}, {:?}, history key <redacted>)",
+            self.ik, self.kk
+        )
+    }
 }
 
 impl DeviceKeys {
     pub fn generate() -> Result<Self, KeyError> {
+        let mut hk = Zeroizing::new([0u8; 32]);
+        random(hk.as_mut())?;
         Ok(Self {
             ik: IdentityKey::generate()?,
             kk: KemKey::generate()?,
+            hk,
         })
     }
 
-    /// Serializes both keys wrapped by `ks`: CBOR `{0: v=1, 1: ik_wrapped, 2: kk_wrapped}`.
+    /// Serializes the keys wrapped by `ks`: CBOR `{0: v=1, 1: ik, 2: kk, 3: hk}` (each wrapped).
     pub fn to_wrapped(&self, ks: &dyn Keystore) -> Result<Vec<u8>, KeyError> {
         let ik = ks.wrap("ik", self.ik.secret().as_ref())?;
         let kk = ks.wrap("kk", self.kk.seed().as_ref())?;
+        let hk = ks.wrap("history", self.hk.as_ref())?;
         let mut e = Encoder::new();
-        e.map(3)
+        e.map(4)
             .uint(0)
             .uint(1)
             .uint(1)
             .bytes(&ik)
             .uint(2)
-            .bytes(&kk);
+            .bytes(&kk)
+            .uint(3)
+            .bytes(&hk);
         Ok(e.into_bytes())
     }
 
@@ -210,13 +226,17 @@ impl DeviceKeys {
         if m.uint(0) != Ok(1) {
             return Err(KeyError::Invalid);
         }
-        let ik = ks.unwrap("ik", m.bytes(1).map_err(|_| KeyError::Invalid)?)?;
-        let kk = ks.unwrap("kk", m.bytes(2).map_err(|_| KeyError::Invalid)?)?;
+        let field = |k: u64, label: &str| -> Result<Zeroizing<Vec<u8>>, KeyError> {
+            ks.unwrap(label, m.bytes(k).map_err(|_| KeyError::Invalid)?)
+        };
+        let (ik, kk, hk) = (field(1, "ik")?, field(2, "kk")?, field(3, "history")?);
         let ik: &[u8; 32] = ik.as_slice().try_into().map_err(|_| KeyError::Invalid)?;
         let kk: &[u8; 32] = kk.as_slice().try_into().map_err(|_| KeyError::Invalid)?;
+        let hk: [u8; 32] = hk.as_slice().try_into().map_err(|_| KeyError::Invalid)?;
         Ok(Self {
             ik: IdentityKey::from_secret(ik),
             kk: KemKey::from_seed(kk),
+            hk: Zeroizing::new(hk),
         })
     }
 }

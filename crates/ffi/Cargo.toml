@@ -1,0 +1,30 @@
+[package]
+name = "warpshot-ffi"
+description = "UniFFI bindings of the Warpshot core for Android"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "warpshot_ffi"
+
+[[bin]]
+# Kotlin binding generator; not part of the Android library.
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+bindgen = ["uniffi/cli"]
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "sync", "macros"] }
+uniffi = "0.32"
+warpshot-core = { path = "../core" }
+zeroize = "1.8"

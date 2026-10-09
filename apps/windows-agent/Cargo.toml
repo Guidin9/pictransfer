@@ -7,7 +7,54 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
-[lints]
-workspace = true
+# Copy of `[workspace.lints]` (keep in sync), except `unsafe_code`: the workspace
+# forbids it, and a `forbid` cannot be relaxed with `#![allow]`, while Win32 FFI
+# needs `unsafe`. Cargo has no partial override of workspace lints, so this crate
+# uses `deny` and main.rs carries the single crate-level `#![allow(unsafe_code)]`.
+[lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
 
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+arithmetic_side_effects = "warn"
+
+# Dependency review (CLAUDE.md, resource-budget.md §2.11): every crate below is
+# MIT/Apache-2.0 (GPL-3.0 compatible), actively maintained, and starts no
+# background threads or timers. tokio is used only as a `current_thread` runtime
+# (no `rt-multi-thread`); its named pipes run on the IOCP of that one thread.
 [dependencies]
+png = "0.18"
+serde_json = "1"
+tokio = { version = "1", features = ["rt", "net", "io-util", "time"] }
+# WinRT toasts and the Start Menu shortcut (COM). Everything else uses windows-sys.
+windows = { version = "0.62", features = [
+    "Data_Xml_Dom",
+    "UI_Notifications",
+    "Win32_Foundation",
+    "Win32_Storage_EnhancedStorage",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_PropertiesSystem",
+] }
+windows-registry = "0.6"
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Console",
+    "Win32_System_DataExchange",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }

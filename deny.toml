@@ -41,3 +41,9 @@ unknown-git = "deny"
 
 [advisories]
 yanked = "deny"
+ignore = [
+    # `paste` is unmaintained (not a vulnerability). It is a compile-time proc-macro
+    # pulled in only by netlink-packet-* via iroh's netwatch on Linux/Android.
+    # Revisit when iroh/netwatch drops it.
+    { id = "RUSTSEC-2024-0436", reason = "unmaintained proc-macro, build-time only, via iroh netwatch" },
+]

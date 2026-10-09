@@ -1,7 +1,10 @@
 //! iroh networking: endpoint configuration (§9), framing (§8.2), transfer
 //! sessions (§8) and pairing (§5).
 
+pub mod flow;
+pub mod manager;
 pub mod pair;
+pub mod server;
 pub mod store;
 pub mod xfer;
 
@@ -42,6 +45,10 @@ pub enum NetError {
     Declined(u64),
     Rejected,
     State(&'static str),
+    /// Server API failure (kind/code only).
+    Server(crate::client::ClientError),
+    /// The server's head moved; fetch, re-check and retry (§4.4).
+    HeadMoved,
 }
 
 impl NetError {
@@ -225,4 +232,63 @@ pub async fn read_frame(
     })
     .await
     .map_err(|_| NetError::Timeout)?
+}
+
+/// True if the connection currently sends over a direct (IP) path.
+pub fn is_direct(conn: &Connection) -> bool {
+    conn.paths().iter().any(|p| p.is_selected() && p.is_ip())
+}
+
+/// `relay_data = off` (§9): wait up to `timeout` for a direct path; otherwise
+/// close with `DIRECT_UNAVAILABLE`.
+pub async fn require_direct(conn: &Connection, timeout: Duration) -> Result<(), NetError> {
+    use n0_future::StreamExt;
+    if is_direct(conn) {
+        return Ok(());
+    }
+    let mut events = conn.path_events();
+    let wait = async {
+        while let Some(ev) = events.next().await {
+            if let iroh::endpoint::PathEvent::Selected { remote_addr, .. } = ev
+                && remote_addr.is_ip()
+            {
+                return true;
+            }
+            if is_direct(conn) {
+                return true;
+            }
+        }
+        false
+    };
+    match tokio::time::timeout(timeout, wait).await {
+        Ok(true) => Ok(()),
+        _ => {
+            close(conn, code::DIRECT_UNAVAILABLE);
+            Err(NetError::Closed(code::DIRECT_UNAVAILABLE))
+        }
+    }
+}
+
+/// The application close code the peer used, if the connection was closed by it.
+pub fn peer_close_code(conn: &Connection) -> Option<u32> {
+    match conn.close_reason()? {
+        iroh::endpoint::ConnectionError::ApplicationClosed(c) => {
+            u32::try_from(c.error_code.into_inner()).ok()
+        }
+        _ => None,
+    }
+}
+
+/// Maps a stream failure to the peer's close code when there is one.
+pub fn explain(conn: &Connection, e: NetError) -> NetError {
+    match (&e, peer_close_code(conn)) {
+        (NetError::Stream(_) | NetError::Timeout, Some(c)) => NetError::Closed(c),
+        _ => e,
+    }
+}
+
+impl From<crate::client::ClientError> for NetError {
+    fn from(e: crate::client::ClientError) -> Self {
+        Self::Server(e)
+    }
 }

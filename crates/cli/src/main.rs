@@ -45,6 +45,7 @@ struct Args {
     out: Option<PathBuf>,
     text: Option<String>,
     yes: bool,
+    accept_large: bool,
     once: bool,
 }
 
@@ -62,6 +63,7 @@ fn parse_args() -> Result<Args, String> {
         out: None,
         text: None,
         yes: false,
+        accept_large: false,
         once: false,
     };
     while let Some(arg) = it.next() {
@@ -81,6 +83,7 @@ fn parse_args() -> Result<Args, String> {
             "--out" => a.out = Some(val()?.into()),
             "--text" => a.text = Some(val()?),
             "--yes" => a.yes = true,
+            "--accept-large" => a.accept_large = true,
             "--once" => a.once = true,
             s if s.starts_with("--") => return Err(format!("unknown option {s}")),
             _ => a.pos.push(arg),
@@ -331,7 +334,7 @@ async fn run(a: Args) -> Result<(), String> {
                         &Policy {
                             dir: out.clone(),
                             max_size: 500 << 20,
-                            accept_large: false,
+                            accept_large: a.accept_large,
                         },
                         |_| true,
                     )

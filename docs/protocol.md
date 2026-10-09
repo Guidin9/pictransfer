@@ -225,6 +225,9 @@ are sufficient.
    - `proof` matches, compared in constant time.
 
    On any failure D closes with `PAIR_PROOF` or `PAIR_EXPIRED` and discards the QR.
+   If both devices are in groups and the groups differ (last row of the table in
+   step 7), D closes with `PAIR_OTHER_GROUP` now: no SAS is shown for a pairing
+   that cannot complete.
 5. D → S `PairInfo { 0: device DeviceInfo, 1: group bstr16?, 2: head LogHead? }`.
 6. Both screens show the SAS: the first 6 characters of
    `BASE32(SHA-256("warpshot/sas/v1" ‖ ekm))`, formatted `XXX-XXX`, together
@@ -265,6 +268,11 @@ order with single spaces as shown; `id` is 32 bytes and `sig` 64 bytes in
 canonical base64url without padding; `ts` is decimal digits without sign or
 leading zeros. `ts` in `signed` is the same digit string. `PATH_AND_QUERY` is the
 request target exactly as sent (no normalization).
+
+Clients MUST use a strictly increasing `ts` per device (Ed25519 is deterministic,
+so two identical requests in the same millisecond would otherwise collide in the
+replay cache). Requests use HTTPS; plain HTTP is allowed only to loopback hosts
+(local `wrangler dev`).
 
 The server MUST:
 - require `|now − ts| ≤ 120 s`;
@@ -311,9 +319,16 @@ take it from build-time deployment config that is not committed (ADR 0007).
   `{"t":"log-get","id":n,"after":seq}`.
 - Server → client: `{"t":"wake","env"}` (the sender identity is only inside the
   envelope), `{"t":"ack","id","via"}`, `{"t":"presence","id","devices"}`,
-  `{"t":"log","records","head"}` (pushed after every accepted append),
+  `{"t":"log","records","head"}` (pushed after every accepted append; the reply to
+  `log-get` is the same message with its `id`, truncated to fit 64 KiB — the client
+  then fetches the rest over HTTP),
   `{"t":"err","id","code"}`, `{"t":"bye","code"}` (for example, after removal).
 - Unknown `t` values MUST be ignored. Maximum message size is 64 KiB.
+- If the upgrade is refused with `not-member`, `no-group` or `not-allowed`, the
+  client stops reconnecting (the device was removed or the group is gone) and
+  re-syncs its state before trying again.
+- `GET …/log` is not paged: a full log (≤ 1024 records ≤ 4 KiB) fits in one
+  response; clients cap that response at 5.5 MiB.
 
 ### 6.4 Wake routing
 

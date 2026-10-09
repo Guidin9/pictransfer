@@ -4,6 +4,7 @@
 pub mod b64u;
 pub mod cbor;
 pub mod client;
+pub mod history;
 pub mod keys;
 pub mod log;
 pub mod net;

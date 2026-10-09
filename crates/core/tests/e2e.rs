@@ -172,6 +172,9 @@ async fn pair_then_transfer_both_ways() {
         )
         .await
         .unwrap();
+        net::require_direct(&s.conn, std::time::Duration::from_secs(5))
+            .await
+            .unwrap();
         s.send_items(items).await
     };
     let (r, s) = tokio::join!(recv, send);
@@ -275,4 +278,173 @@ async fn pair_then_transfer_both_ways() {
     for ep in [ep_pc, ep_phone, ep_x] {
         ep.close().await;
     }
+}
+
+/// Runs one pairing between `display` and `scanner` devices; returns both results.
+async fn pair_once(
+    disp: &Device,
+    scan: &Device,
+) -> (
+    Result<net::pair::Paired, net::NetError>,
+    Result<net::pair::Paired, net::NetError>,
+) {
+    let ep_d = net::bind(&disp.keys.ik, Relay::Disabled).await.unwrap();
+    let ep_s = net::bind(&scan.keys.ik, Relay::Disabled).await.unwrap();
+    let mut window = Window::open(
+        disp.id(),
+        net::dial_info(&ep_d),
+        disp.name.clone(),
+        disp.group_id(),
+        now_ms() / 1000,
+    )
+    .unwrap();
+    let qr = QrPayload::parse(&window.qr_text()).unwrap();
+    let r = tokio::join!(
+        async {
+            let conn = accept_conn(&ep_d).await;
+            net::pair::display(
+                &ep_d,
+                conn,
+                &mut window,
+                disp,
+                now_ms(),
+                |_| async { true },
+                |_| async { Ok(()) },
+            )
+            .await
+        },
+        net::pair::scan(
+            &ep_s,
+            &qr,
+            scan,
+            now_ms(),
+            |_| async { true },
+            |_| async { Ok(()) }
+        )
+    );
+    ep_d.close().await;
+    ep_s.close().await;
+    r
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pairing_resolution_table_all_rows() {
+    // Row 1: none/none → new group (display appends genesis + add).
+    let mut pc = Device::new("pc", platform::WINDOWS).unwrap();
+    let mut phone = Device::new("phone", platform::ANDROID).unwrap();
+    let (d, s) = pair_once(&pc, &phone).await;
+    let (d, s) = (d.unwrap(), s.unwrap());
+    assert_eq!(d.log.records().len(), 2);
+    assert_eq!(d.log.head(), s.log.head());
+    pc.log = Some(d.log);
+    phone.log = Some(s.log);
+    let g = pc.group_id().unwrap();
+
+    // Row 2: display in G, scanner none → display adds the scanner.
+    let mut tablet = Device::new("tablet", platform::ANDROID).unwrap();
+    let (d, s) = pair_once(&pc, &tablet).await;
+    let (d, s) = (d.unwrap(), s.unwrap());
+    assert_eq!(d.log.group_id(), g);
+    assert_eq!(d.log.records().len(), 3);
+    assert!(s.log.is_member(&tablet.id()));
+    pc.log = Some(d.log);
+    tablet.log = Some(s.log);
+
+    // Row 3: display none, scanner in G → the scanner appends add(display).
+    let mut laptop = Device::new("laptop", platform::WINDOWS).unwrap();
+    let (d, s) = pair_once(&laptop, &tablet).await;
+    let (d, s) = (d.unwrap(), s.unwrap());
+    assert_eq!(s.log.group_id(), g);
+    assert!(d.log.is_member(&laptop.id()) && d.log.is_member(&tablet.id()));
+    assert_eq!(d.log.records().len(), 4);
+    laptop.log = Some(d.log);
+
+    // Row 4: both in G (same head) → already paired, no new records.
+    let (d, s) = pair_once(&laptop, &tablet).await;
+    let (d, s) = (d.unwrap(), s.unwrap());
+    assert_eq!(d.log.records().len(), 4);
+    assert_eq!(s.log.head(), laptop.head());
+
+    // Row 5: different groups → PAIR_OTHER_GROUP, nothing changes.
+    let other_pc = Device::new("other-pc", platform::WINDOWS).unwrap();
+    let mut other_phone = Device::new("other-phone", platform::ANDROID).unwrap();
+    let (_, s) = pair_once(&other_pc, &other_phone).await;
+    other_phone.log = Some(s.unwrap().log);
+    let (d, s) = pair_once(&pc, &other_phone).await;
+    assert_eq!(
+        d.unwrap_err(),
+        net::NetError::Closed(warpshot_core::xfer::code::PAIR_OTHER_GROUP)
+    );
+    assert!(s.is_err());
+    let _ = phone;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn wake_driven_transfer() {
+    use warpshot_core::net::flow::{self, PendingSessions, WakeAction};
+    let mut pc = Device::new("pc", platform::WINDOWS).unwrap();
+    let mut phone = Device::new("phone", platform::ANDROID).unwrap();
+    let (d, s) = pair_once(&pc, &phone).await;
+    pc.log = Some(d.unwrap().log);
+    phone.log = Some(s.unwrap().log);
+    let ep_pc = net::bind(&pc.keys.ik, Relay::Disabled).await.unwrap();
+    let ep_phone = net::bind(&phone.keys.ik, Relay::Disabled).await.unwrap();
+
+    // PC (sender) keeps the items pending and seals a connect wake for the phone.
+    let mut pending = PendingSessions::default();
+    let items = vec![nx::text_item(1, "pano içeriği", now_ms()).unwrap()];
+    let session = pending.insert(phone.id(), items.clone()).unwrap();
+    let env = flow::connect_wake(&ep_pc, &pc, &phone.id(), session, &items, now_ms()).unwrap();
+    assert!(warpshot_core::b64u::encode(&env).len() <= warpshot_core::wake::MAX_ENVELOPE_B64U);
+
+    // Phone opens it (the server/FCM only relayed opaque bytes).
+    let mut replay = warpshot_core::wake::ReplayCache::default();
+    let (sender, action) = flow::open_wake(&phone, &env, now_ms(), &mut replay).unwrap();
+    assert_eq!(sender, pc.id());
+    let WakeAction::Connect {
+        session: got_session,
+        dial,
+        preview,
+        ..
+    } = action
+    else {
+        panic!("connect expected")
+    };
+    assert_eq!(got_session, session);
+    assert_eq!(preview.unwrap().count, 1);
+    // Replaying the same envelope is refused.
+    assert!(flow::open_wake(&phone, &env, now_ms(), &mut replay).is_err());
+
+    let pc_log = pc.log.clone().unwrap();
+    let phone_log = phone.log.clone().unwrap();
+    let dir = tmpdir("wake");
+    let policy = Policy {
+        dir,
+        max_size: 1 << 30,
+        accept_large: false,
+    };
+    let (sent, received) = tokio::join!(
+        async {
+            let conn = accept_conn(&ep_pc).await;
+            let s = nx::accept(&ep_pc, conn, &pc_log).await.unwrap();
+            let p = pending
+                .take(&s.hello_session, &s.peer)
+                .expect("pending session");
+            s.send_items(p.items).await
+        },
+        async {
+            let s = flow::answer_connect(&ep_phone, &phone_log, &sender, got_session, &dial)
+                .await
+                .unwrap();
+            s.receive(&policy, |_| true).await
+        }
+    );
+    assert_eq!(sent.unwrap(), vec![(1, true)]);
+    assert_eq!(
+        received.unwrap()[0].item.text.as_deref(),
+        Some("pano içeriği")
+    );
+    assert!(pending.is_empty());
+    ep_pc.close().await;
+    ep_phone.close().await;
 }

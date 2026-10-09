@@ -38,18 +38,18 @@ connection (`docs/dev-setup.md`).
 | C2 | Keys and keystore trait (DPAPI impl in the agent; Android via an FFI callback) | round-trip tests; keys never appear in `Debug` output |
 | C3 ✓ | Membership log: records, §4.3 validation, state, append/CAS logic, fork detection | `record.json` vectors; property tests (random ops, forks, re-adds) |
 | C4 ✓ | Wake envelopes §7: seal/open, replay cache | `wake.json` vectors; every tamper case rejected |
-| C5 | Server client: §6.1 auth, REST, WebSocket (keepalive, backoff, resume) | `server-auth.json`; integration test against `wrangler dev` |
-| C6 | Endpoint manager: on-demand bind, 30 s idle teardown, single relay, no address lookup, direct-only policy | unit tests + spike A numbers reproduced |
-| C7 | Transfer §8: handshake and key schedule, control messages, item streams, BLAKE3, temp file + atomic rename, name sanitization | `xfer-keys.json`; warpctl E2E with text, image and a 1 GB file; relay-only and direct-only modes |
-| C8 | Pairing §5: QR encode/decode, SAS, group resolution table | `pair.json`; warpctl pairing E2E covering all 5 table rows |
-| C9 | Settings store and history store (encrypted fields) | tests; no plaintext names in the DB file |
-| C10 | Test-vector generator (`gen_vectors`) used by core and server | vectors reproducible from fixed seeds |
+| C5 ✓ | Server client: §6.1 auth, REST, WebSocket (keepalive, backoff, resume) | `server-auth.json`; integration test against `wrangler dev` |
+| C6 ✓ | Endpoint manager: on-demand bind, 30 s idle teardown, single relay, no address lookup, direct-only policy | unit tests + spike A numbers reproduced |
+| C7 ✓ | Transfer §8: handshake and key schedule, control messages, item streams, BLAKE3, temp file + atomic rename, name sanitization | `xfer-keys.json`; warpctl E2E with text, image and a 1 GB file; relay-only and direct-only modes |
+| C8 ✓ | Pairing §5: QR encode/decode, SAS, group resolution table | `pair.json`; warpctl pairing E2E covering all 5 table rows |
+| C9 ✓ | Settings store and history store (encrypted fields) | tests; no plaintext names in the DB file |
+| C10 ✓ | Test-vector generator (`gen_vectors`) used by core and server | vectors reproducible from fixed seeds |
 
 ### CLI (`crates/cli`, `warpctl`)
 
 | Id | Task | Acceptance |
 |---|---|---|
-| L1 | `init`, `pair-display`, `pair-scan <qr>`, `send <device> <path>` / `send <device> --text`, `listen`, `devices`, `log`, `remove` | `scripts/e2e-local.ps1` green |
+| L1 ✓ | `init`, `pair-display`, `pair-scan <qr>`, `send <device> <path>` / `send <device> --text`, `listen`, `devices`, `log`, `remove` | `scripts/e2e-local.ps1` green |
 
 ### Server (`server/`)
 
