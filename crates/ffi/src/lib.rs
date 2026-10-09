@@ -26,6 +26,9 @@ use zeroize::Zeroizing;
 
 uniffi::setup_scaffolding!();
 
+#[cfg(target_os = "android")]
+mod android;
+
 #[derive(Debug, uniffi::Error)]
 pub enum WarpError {
     NotPaired,

@@ -7,8 +7,18 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
-[lints]
-workspace = true
+# Copy of `[workspace.lints]` (keep in sync), except `unsafe_code`: the JNI
+# entry point in android.rs needs `unsafe` (a `forbid` cannot be relaxed).
+[lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+arithmetic_side_effects = "warn"
 
 [lib]
 crate-type = ["cdylib", "lib"]
@@ -28,3 +38,9 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "sync", "m
 uniffi = "0.32"
 warpshot-core = { path = "../core" }
 zeroize = "1.8"
+
+# Android: hand the JavaVM and application Context to iroh's DNS and network
+# monitor (ndk-context). Both MIT/Apache-2.0, maintained, no threads.
+[target.'cfg(target_os = "android")'.dependencies]
+jni-sys = "0.3"
+ndk-context = "0.1"

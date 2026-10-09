@@ -123,15 +123,26 @@ pub async fn bind(ik: &IdentityKey, relay: Relay) -> Result<Endpoint, NetError> 
         Some(u) => RelayMode::custom([u]),
         None => RelayMode::Disabled,
     };
-    Endpoint::builder(presets::Minimal)
+    let ep = Endpoint::builder(presets::Minimal)
         .secret_key(sk)
         .relay_mode(relay_mode)
         .clear_address_lookup()
         .alpns(vec![crate::xfer::ALPN.to_vec(), crate::pair::ALPN.to_vec()])
         .bind()
         .await
-        .map_err(|_| NetError::Bind)
+        .map_err(|_| NetError::Bind)?;
+    // The dial info we hand out (QR, wake envelope) must carry the relay: right
+    // after bind the home relay is not connected yet and `addr()` omits it, and
+    // without it a peer behind a firewall (e.g. a "Public" Windows network) can't
+    // reach us at all. Wait briefly; offline we continue with direct addresses.
+    if relay != Relay::Disabled {
+        let _ = tokio::time::timeout(RELAY_WAIT, ep.online()).await;
+    }
+    Ok(ep)
 }
+
+/// How long [`bind`] waits for the home relay connection.
+pub const RELAY_WAIT: Duration = Duration::from_secs(5);
 
 /// Our dial info: the configured relay plus current direct addresses.
 pub fn dial_info(ep: &Endpoint) -> DialInfo {

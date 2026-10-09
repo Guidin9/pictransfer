@@ -71,6 +71,18 @@ class AndroidKeystore : PlatformKeystore {
 object Core {
     private const val PREFS = "warpshot"
     private var instance: Warpshot? = null
+    private var jniReady = false
+
+    /** Gives the Rust core (iroh DNS + network monitor) the JavaVM and app Context. */
+    @JvmStatic
+    private external fun initAndroid(context: Context)
+
+    private fun ensureJni(ctx: Context) {
+        if (jniReady) return
+        System.loadLibrary("warpshot_ffi")
+        initAndroid(ctx.applicationContext)
+        jniReady = true
+    }
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -88,6 +100,7 @@ object Core {
 
     @Synchronized
     private fun open(ctx: Context, url: String): Warpshot {
+        ensureJni(ctx)
         val dir = ctx.filesDir.resolve("core").apply { mkdirs() }
         val w = Warpshot.open(dir.path, deviceName(ctx), url, AndroidKeystore())
         instance = w

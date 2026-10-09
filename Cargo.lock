@@ -3899,6 +3899,8 @@ dependencies = [
 name = "warpshot-ffi"
 version = "0.1.0"
 dependencies = [
+ "jni-sys 0.3.1",
+ "ndk-context",
  "tokio",
  "uniffi",
  "warpshot-core",
