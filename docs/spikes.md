@@ -84,7 +84,32 @@ Results:
 
 | Date | Commit | B1 | B2 | B3 | B4 | Notes |
 |---|---|---|---|---|---|---|
-| – | – | – | – | – | – | – |
+| 2026-10-09 | Spike B | 0.69 MB / 5 threads / 0 % ✓ | ≈ 0.25 MB/day ✓ | 0.6 ms ✓ / 84 ms ✓ | `@` flagged, S+Shift clear ✓ | see below |
+
+Setup: release build (opt-level "s", fat LTO, strip; 1.2 MB exe), hidden window +
+tray icon + `RegisterHotKey`, one `current_thread` tokio thread holding the
+WebSocket to the Spike C Worker (rustls + ring + webpki-roots, a ~150-line
+RFC 6455 client, no WebSocket crate), EcoQoS on, working set trimmed after
+startup and after each connect. `measure-idle.ps1`: 60 s warm-up, 10 min of
+samples.
+
+- **B1:** private working set 0.69 MB max, private bytes 1.89 MB, 5 threads
+  (main, tokio, three OS pool threads), CPU 0 %, 184 → 183 handles, one TCP connection.
+- **B2:** internal counters over 780 s: 12 pings, 12 pongs, 0 missed; 5259 B in /
+  954 B out at the TLS layer, almost all of it the TLS handshake. Steady state is
+  ≈ 54 B of TLS records per keepalive round trip → ≈ 78 KB/day at K = 60 s, about
+  250 KB/day with TCP/IP headers (estimate; confirm with `pktmon` once). K = 120 s
+  would halve it — decide with Spike C.
+- **B3:** synthetic 3840×2160 UI-like screenshot. PNG already on the clipboard:
+  0.6 ms (one copy). DIB → PNG with the `png` crate: 190 ms with the default
+  adaptive filter, **84 ms with `Filter::Sub` + `Compression::Fast`** (+7 % size,
+  3.98 MB). The agent uses Sub/Fast.
+- **B4:** on Turkish Q, `ToUnicodeEx` (flag 4, no keyboard-state change) yields
+  `@` for Ctrl+Alt+Q → flagged; Ctrl+Alt+Shift+S yields nothing → clear. The
+  layout was already installed; otherwise the probe loads it with
+  `KLF_NOTELLSHELL` and unloads it again.
+- The WebSocket root store is built per connection and dropped with it, so it
+  is not resident while connected-and-idle beyond what rustls keeps.
 
 ## Spike C — hibernating Durable Object WebSocket
 

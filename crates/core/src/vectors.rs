@@ -4,7 +4,12 @@
 //! Regenerate: `cargo test -p warpshot-core gen_vectors -- --ignored`.
 //! `vectors_are_current` fails when the committed files drift from the code.
 
-#![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::arithmetic_side_effects, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::panic
+)]
 
 use std::path::PathBuf;
 
@@ -14,7 +19,8 @@ use crate::{
     cbor::{self, Encoder, Limits, Value},
     keys::{IdentityKey, KemKey},
     log::{
-        self, DeviceInfo, GroupId, Log, LogError, Op, RECORD_LABEL, RecordBody, RemoveReason, sign_record,
+        self, DeviceInfo, GroupId, Log, LogError, Op, RECORD_LABEL, RecordBody, RemoveReason,
+        sign_record,
     },
 };
 
@@ -23,7 +29,10 @@ fn hex(b: &[u8]) -> String {
 }
 
 fn unhex(s: &str) -> Vec<u8> {
-    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+        .collect()
 }
 
 fn dir() -> PathBuf {
@@ -33,9 +42,17 @@ fn dir() -> PathBuf {
 /// Inputs that every strict decoder MUST reject (§1), with the reason.
 const CBOR_REJECT: &[(&str, &str, &str)] = &[
     ("non-shortest uint (1 byte for 23)", "1817", "NonShortest"),
-    ("non-shortest uint (2 bytes for 255)", "1900ff", "NonShortest"),
+    (
+        "non-shortest uint (2 bytes for 255)",
+        "1900ff",
+        "NonShortest",
+    ),
     ("non-shortest uint (4 bytes)", "1a0000ffff", "NonShortest"),
-    ("non-shortest uint (8 bytes)", "1b00000000ffffffff", "NonShortest"),
+    (
+        "non-shortest uint (8 bytes)",
+        "1b00000000ffffffff",
+        "NonShortest",
+    ),
     ("non-shortest bstr length", "580100", "NonShortest"),
     ("non-shortest array length", "98020102", "NonShortest"),
     ("non-shortest map key", "a1180101", "NonShortest"),
@@ -63,8 +80,16 @@ const CBOR_REJECT: &[(&str, &str, &str)] = &[
     ("truncated uint", "1a0001", "Truncated"),
     ("truncated bstr", "4401", "Truncated"),
     ("truncated array", "830102", "Truncated"),
-    ("huge declared array length", "9b0000000100000000", "Truncated"),
-    ("huge declared bstr length", "5bffffffffffffffff", "Truncated"),
+    (
+        "huge declared array length",
+        "9b0000000100000000",
+        "Truncated",
+    ),
+    (
+        "huge declared bstr length",
+        "5bffffffffffffffff",
+        "Truncated",
+    ),
     ("trailing bytes", "0000", "TrailingBytes"),
     ("nesting depth 9", "818181818181818100", "TooDeep"),
 ];
@@ -89,12 +114,24 @@ const NOW: u64 = 1_790_000_000_000;
 const GROUP: [u8; 16] = [0x47; 16];
 
 fn dev(name: &str, platform: u64, kem_seed: u8) -> DeviceInfo {
-    DeviceInfo { name: name.into(), platform, kem_pk: KemKey::from_seed(&[kem_seed; 32]).public_key(), app: Some("0.1.0".into()) }
+    DeviceInfo {
+        name: name.into(),
+        platform,
+        kem_pk: KemKey::from_seed(&[kem_seed; 32]).public_key(),
+        app: Some("0.1.0".into()),
+    }
 }
 
 fn body(log: &Log, subject: &IdentityKey, op: Op, dt: u64) -> RecordBody {
     let (seq, prev) = log.next_position();
-    RecordBody { group_id: GroupId(GROUP), seq, prev, created_at: NOW + dt, subject: subject.endpoint_id(), op }
+    RecordBody {
+        group_id: GroupId(GROUP),
+        seq,
+        prev,
+        created_at: NOW + dt,
+        subject: subject.endpoint_id(),
+        op,
+    }
 }
 
 /// Signs an arbitrary body map (for invalid shapes the typed builder cannot express).
@@ -103,7 +140,10 @@ fn raw_record(ik: &IdentityKey, entries: Vec<(u64, Value<'_>)>) -> Vec<u8> {
     let mut msg = RECORD_LABEL.to_vec();
     msg.extend_from_slice(&b);
     let mut e = Encoder::new();
-    e.array(3).bytes(&b).bytes(&ik.endpoint_id().0).bytes(&ik.sign(&msg));
+    e.array(3)
+        .bytes(&b)
+        .bytes(&ik.endpoint_id().0)
+        .bytes(&ik.sign(&msg));
     e.into_bytes()
 }
 
@@ -113,8 +153,13 @@ fn record_vectors() -> J {
     let mut log = Log::new(GroupId(GROUP));
     let mut valid = Vec::new();
     let mut push = |log: &mut Log, raw: Vec<u8>, what: &str| {
-        let rec = log.append(&raw, NOW).unwrap_or_else(|e| panic!("{what}: {e}")).clone();
-        valid.push(json!({ "what": what, "record": hex(&raw), "id": hex(&rec.id.0), "seq": rec.body.seq }));
+        let rec = log
+            .append(&raw, NOW)
+            .unwrap_or_else(|e| panic!("{what}: {e}"))
+            .clone();
+        valid.push(
+            json!({ "what": what, "record": hex(&raw), "id": hex(&rec.id.0), "seq": rec.body.seq }),
+        );
     };
     let raw = sign_record(&a, &body(&log, &a, Op::Genesis(dev("desk-pc", 1, 0x01)), 0));
     push(&mut log, raw, "genesis by A");
@@ -124,7 +169,10 @@ fn record_vectors() -> J {
     push(&mut log, raw, "B renames and rotates its KEM key");
     let raw = sign_record(&b, &body(&log, &c, Op::Add(dev("laptop", 1, 0x04)), 3000));
     push(&mut log, raw, "B adds C");
-    let raw = sign_record(&a, &body(&log, &c, Op::Remove(RemoveReason::LostOrStolen), 4000));
+    let raw = sign_record(
+        &a,
+        &body(&log, &c, Op::Remove(RemoveReason::LostOrStolen), 4000),
+    );
     push(&mut log, raw, "A removes C (lost or stolen)");
     let members: Vec<String> = log.members().keys().map(|id| hex(&id.0)).collect();
 
@@ -139,7 +187,11 @@ fn record_vectors() -> J {
         invalid.push(json!({ "name": name, "prefix": prefix, "record": hex(&raw), "error": format!("{err:?}") }));
     };
     let d = dev("tablet", 2, 0x05);
-    let base = |op: u64, extra: Vec<(u64, Value<'static>)>, seq: u64, subject: [u8; 32]| -> Vec<(u64, Value<'static>)> {
+    let base = |op: u64,
+                extra: Vec<(u64, Value<'static>)>,
+                seq: u64,
+                subject: [u8; 32]|
+     -> Vec<(u64, Value<'static>)> {
         let mut v = vec![
             (0, Value::Uint(1)),
             (1, Value::Bytes(&GROUP)),
@@ -156,7 +208,10 @@ fn record_vectors() -> J {
         Value::Map(vec![
             (0, Value::Text(Box::leak(dev.name.clone().into_boxed_str()))),
             (1, Value::Uint(dev.platform)),
-            (2, Value::Bytes(Box::leak(dev.kem_pk.clone().into_boxed_slice()))),
+            (
+                2,
+                Value::Bytes(Box::leak(dev.kem_pk.clone().into_boxed_slice())),
+            ),
         ])
     };
     let cid = c.endpoint_id().0;
@@ -164,39 +219,128 @@ fn record_vectors() -> J {
 
     let mut bd = body(&log, &c, Op::Add(d.clone()), 5000);
     bd.group_id = GroupId([0x48; 16]);
-    bad("wrong group_id", sign_record(&a, &bd), LogError::GroupMismatch);
+    bad(
+        "wrong group_id",
+        sign_record(&a, &bd),
+        LogError::GroupMismatch,
+    );
     let mut bd = body(&log, &c, Op::Add(d.clone()), 5000);
     bd.seq = n + 1;
     bad("seq skips one", sign_record(&a, &bd), LogError::SeqMismatch);
     let mut bd = body(&log, &c, Op::Add(d.clone()), 5000);
     bd.prev = Some(log::RecordId([0; 32]));
-    bad("prev is not the head", sign_record(&a, &bd), LogError::PrevMismatch);
-    bad("second genesis", sign_record(&a, &body(&log, &c, Op::Genesis(d.clone()), 5000)), LogError::NotGenesisOp);
-    bad("signer was removed", sign_record(&c, &body(&log, &c, Op::Add(d.clone()), 5000)), LogError::SignerNotMember);
-    bad("created_at too far in the future", sign_record(&a, &body(&log, &c, Op::Add(d.clone()), 11 * 60 * 1000)), LogError::TimeFuture);
+    bad(
+        "prev is not the head",
+        sign_record(&a, &bd),
+        LogError::PrevMismatch,
+    );
+    bad(
+        "second genesis",
+        sign_record(&a, &body(&log, &c, Op::Genesis(d.clone()), 5000)),
+        LogError::NotGenesisOp,
+    );
+    bad(
+        "signer was removed",
+        sign_record(&c, &body(&log, &c, Op::Add(d.clone()), 5000)),
+        LogError::SignerNotMember,
+    );
+    bad(
+        "created_at too far in the future",
+        sign_record(&a, &body(&log, &c, Op::Add(d.clone()), 11 * 60 * 1000)),
+        LogError::TimeFuture,
+    );
     let mut bd = body(&log, &c, Op::Add(d.clone()), 0);
     bd.created_at = NOW + 4000 - 10 * 60 * 1000 - 1;
-    bad("created_at regresses more than 10 min", sign_record(&a, &bd), LogError::TimeRegress);
-    bad("add an existing member", sign_record(&a, &body(&log, &b, Op::Add(d.clone()), 5000)), LogError::AddExisting);
-    bad("remove a non-member", sign_record(&a, &body(&log, &c, Op::Remove(RemoveReason::User), 5000)), LogError::RemoveMissing);
-    bad("update signed by someone else", sign_record(&a, &body(&log, &b, Op::Update(dev("x", 2, 6)), 5000)), LogError::UpdateNotSelf);
-    bad("update changes platform", sign_record(&b, &body(&log, &b, Op::Update(dev("x", 1, 6)), 5000)), LogError::UpdatePlatform);
+    bad(
+        "created_at regresses more than 10 min",
+        sign_record(&a, &bd),
+        LogError::TimeRegress,
+    );
+    bad(
+        "add an existing member",
+        sign_record(&a, &body(&log, &b, Op::Add(d.clone()), 5000)),
+        LogError::AddExisting,
+    );
+    bad(
+        "remove a non-member",
+        sign_record(&a, &body(&log, &c, Op::Remove(RemoveReason::User), 5000)),
+        LogError::RemoveMissing,
+    );
+    bad(
+        "update signed by someone else",
+        sign_record(&a, &body(&log, &b, Op::Update(dev("x", 2, 6)), 5000)),
+        LogError::UpdateNotSelf,
+    );
+    bad(
+        "update changes platform",
+        sign_record(&b, &body(&log, &b, Op::Update(dev("x", 1, 6)), 5000)),
+        LogError::UpdatePlatform,
+    );
     let mut raw = sign_record(&a, &body(&log, &c, Op::Add(d.clone()), 5000));
     let last = raw.len() - 1;
     raw[last] ^= 0x01;
     bad("signature bit flipped", raw, LogError::BadSignature);
-    bad("add without device", raw_record(&a, base(1, vec![], n, cid)), LogError::Presence);
-    bad("remove with device", raw_record(&a, base(2, vec![(7, dmap(&d)), (8, Value::Uint(0))], n, bid)), LogError::Presence);
-    bad("remove reason 4", raw_record(&a, base(2, vec![(8, Value::Uint(4))], n, bid)), LogError::Presence);
-    bad("add with reason", raw_record(&a, base(1, vec![(7, dmap(&d)), (8, Value::Uint(0))], n, cid)), LogError::Presence);
-    bad("op 4", raw_record(&a, base(4, vec![], n, cid)), LogError::UnknownOp);
-    bad("device name empty", raw_record(&a, base(1, vec![(7, dmap(&dev("", 2, 5)))], n, cid)), LogError::DeviceName);
-    bad("device name with control char", raw_record(&a, base(1, vec![(7, dmap(&dev("a\nb", 2, 5)))], n, cid)), LogError::DeviceName);
-    bad("device name 65 bytes", raw_record(&a, base(1, vec![(7, dmap(&dev(&"n".repeat(65), 2, 5)))], n, cid)), LogError::DeviceName);
-    bad("platform 0", raw_record(&a, base(1, vec![(7, dmap(&dev("t", 0, 5)))], n, cid)), LogError::DevicePlatform);
+    bad(
+        "add without device",
+        raw_record(&a, base(1, vec![], n, cid)),
+        LogError::Presence,
+    );
+    bad(
+        "remove with device",
+        raw_record(
+            &a,
+            base(2, vec![(7, dmap(&d)), (8, Value::Uint(0))], n, bid),
+        ),
+        LogError::Presence,
+    );
+    bad(
+        "remove reason 4",
+        raw_record(&a, base(2, vec![(8, Value::Uint(4))], n, bid)),
+        LogError::Presence,
+    );
+    bad(
+        "add with reason",
+        raw_record(
+            &a,
+            base(1, vec![(7, dmap(&d)), (8, Value::Uint(0))], n, cid),
+        ),
+        LogError::Presence,
+    );
+    bad(
+        "op 4",
+        raw_record(&a, base(4, vec![], n, cid)),
+        LogError::UnknownOp,
+    );
+    bad(
+        "device name empty",
+        raw_record(&a, base(1, vec![(7, dmap(&dev("", 2, 5)))], n, cid)),
+        LogError::DeviceName,
+    );
+    bad(
+        "device name with control char",
+        raw_record(&a, base(1, vec![(7, dmap(&dev("a\nb", 2, 5)))], n, cid)),
+        LogError::DeviceName,
+    );
+    bad(
+        "device name 65 bytes",
+        raw_record(
+            &a,
+            base(1, vec![(7, dmap(&dev(&"n".repeat(65), 2, 5)))], n, cid),
+        ),
+        LogError::DeviceName,
+    );
+    bad(
+        "platform 0",
+        raw_record(&a, base(1, vec![(7, dmap(&dev("t", 0, 5)))], n, cid)),
+        LogError::DevicePlatform,
+    );
     let mut short = d.clone();
     short.kem_pk.pop();
-    bad("kem_pk 1215 bytes", raw_record(&a, base(1, vec![(7, dmap(&short))], n, cid)), LogError::DeviceKemKey);
+    bad(
+        "kem_pk 1215 bytes",
+        raw_record(&a, base(1, vec![(7, dmap(&short))], n, cid)),
+        LogError::DeviceKemKey,
+    );
     let mut v = base(1, vec![(7, dmap(&d))], n, cid);
     v[0] = (0, Value::Uint(2));
     bad("record version 2", raw_record(&a, v), LogError::Version);
@@ -213,7 +357,9 @@ fn record_vectors() -> J {
     accept.push(json!({ "name": "unknown platform 77 and an unknown DeviceInfo key", "prefix": prefix, "record": hex(&r) }));
     let r = sign_record(&b, &body(&log, &b, Op::Remove(RemoveReason::Left), 5000));
     log.check(&r, NOW).unwrap();
-    accept.push(json!({ "name": "member removes itself (leave)", "prefix": prefix, "record": hex(&r) }));
+    accept.push(
+        json!({ "name": "member removes itself (leave)", "prefix": prefix, "record": hex(&r) }),
+    );
 
     json!({
         "description": "Membership log vectors (protocol §4). Validate 'valid' in order from an empty log with now_ms; then each 'invalid' record MUST be rejected and each 'accept' record MUST be accepted as record number 'prefix'. Keys: Ed25519 secret = 32 × seed byte. 'error' names the rule (informational).",
@@ -231,8 +377,103 @@ fn record_vectors() -> J {
     })
 }
 
+fn wake_vectors() -> J {
+    use crate::{
+        keys::kid,
+        log::Head,
+        wake::{self, DialInfo, Inner, Kind, Preview, WakeError},
+    };
+    let sender = IdentityKey::from_secret(&[0xa1; 32]);
+    let recipient = IdentityKey::from_secret(&[0xb2; 32]);
+    let rkem = KemKey::from_seed(&[0x02; 32]);
+    let rpk = rkem.public_key();
+    let me = recipient.endpoint_id();
+    let head = Head {
+        seq: 4,
+        id: log::RecordId([0x99; 32]),
+    };
+    let connect = Inner {
+        kind: Kind::Connect {
+            session: [0x5e; 16],
+            dial: DialInfo {
+                relay: Some("https://euc1-1.relay.n0.iroh.link./".into()),
+                addrs: vec![
+                    "192.168.1.20:41234".parse().unwrap(),
+                    "[2001:db8::7]:41234".parse().unwrap(),
+                ],
+            },
+            preview: Some(Preview {
+                count: 1,
+                total_size: 248_113,
+                kinds: vec![2],
+            }),
+        },
+        ts: NOW,
+        nonce: [0x0c; 16],
+        group_id: GroupId(GROUP),
+        head,
+    };
+    let changed = Inner {
+        kind: Kind::GroupChanged,
+        nonce: [0x0d; 16],
+        ..connect.clone()
+    };
+    let mut cases = Vec::new();
+    for (name, inner, eseed) in [
+        ("connect", &connect, [0x31u8; 64]),
+        ("group-changed", &changed, [0x32u8; 64]),
+    ] {
+        let env = wake::seal_with(&sender, &me, &rpk, inner, &eseed).unwrap();
+        let opened = wake::open(&env, &me, |_| Some(&rkem)).unwrap();
+        assert_eq!(&opened.inner, inner);
+        cases.push(json!({
+            "name": name,
+            "eseed": hex(&eseed),
+            "inner": hex(&inner.encode()),
+            "envelope": hex(&env),
+            "envelope_b64u": crate::b64u::encode(&env),
+        }));
+    }
+    let env = wake::seal_with(&sender, &me, &rpk, &connect, &[0x31; 64]).unwrap();
+    let flip = |at: usize| {
+        let mut b = env.clone();
+        b[at] ^= 0x01;
+        b
+    };
+    let kid_pk = kid(&rpk);
+    let mut tamper = Vec::new();
+    // Layout: 84 01 48 <kid 8> 59 0460 <ct_kem 1120> 59 xxxx <ct>.
+    for (name, raw, err) in [
+        ("kid flipped", flip(3), WakeError::UnknownKid),
+        ("ct_kem flipped", flip(14), WakeError::Aead),
+        ("ciphertext flipped", flip(1140), WakeError::Aead),
+        ("tag flipped", flip(env.len() - 1), WakeError::Aead),
+    ] {
+        let got = wake::open(&raw, &me, |k| (*k == kid_pk).then_some(&rkem)).unwrap_err();
+        assert_eq!(got, err, "{name}");
+        tamper.push(json!({ "name": name, "envelope": hex(&raw), "error": format!("{err:?}") }));
+    }
+    assert_eq!(
+        wake::open(&env, &sender.endpoint_id(), |_| Some(&rkem)).unwrap_err(),
+        WakeError::Aead
+    );
+    json!({
+        "description": "Wake envelopes (protocol §7). Sender secret = 32 × 0xa1, recipient secret = 32 × 0xb2, recipient X-Wing seed = 32 × 0x02. seal(eseed) MUST reproduce 'envelope' byte for byte; open MUST return 'inner'. Tamper cases MUST be rejected; opening as the sender's id MUST fail (recipient binding).",
+        "sender_endpoint_id": hex(&sender.endpoint_id().0),
+        "recipient_endpoint_id": hex(&me.0),
+        "recipient_kem_pk": hex(&rpk),
+        "kid": hex(&kid_pk),
+        "cases": cases,
+        "tamper": tamper,
+    })
+}
+
 fn all() -> Vec<(&'static str, J)> {
-    vec![("cbor-reject.json", cbor_reject()), ("record.json", record_vectors())]
+    vec![
+        ("cbor-reject.json", cbor_reject()),
+        ("record.json", record_vectors()),
+        ("wake.json", wake_vectors()),
+    ]
 }
 
 fn render(v: &J) -> String {
@@ -255,22 +496,36 @@ fn vectors_are_current() {
         let Ok(on_disk) = std::fs::read_to_string(&path) else {
             panic!("{name} missing; run gen_vectors");
         };
-        assert_eq!(on_disk.replace("\r\n", "\n"), render(&v), "{name} is stale; run gen_vectors");
+        assert_eq!(
+            on_disk.replace("\r\n", "\n"),
+            render(&v),
+            "{name} is stale; run gen_vectors"
+        );
     }
 }
 
 #[test]
 fn record_vectors_replay() {
-    let v: J = serde_json::from_str(&std::fs::read_to_string(dir().join("record.json")).unwrap()).unwrap();
+    let v: J =
+        serde_json::from_str(&std::fs::read_to_string(dir().join("record.json")).unwrap()).unwrap();
     let now = v["now_ms"].as_u64().unwrap();
     let g: [u8; 16] = unhex(v["group_id"].as_str().unwrap()).try_into().unwrap();
-    let raws: Vec<Vec<u8>> = v["valid"].as_array().unwrap().iter().map(|r| unhex(r["record"].as_str().unwrap())).collect();
+    let raws: Vec<Vec<u8>> = v["valid"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| unhex(r["record"].as_str().unwrap()))
+        .collect();
     let log = Log::from_records(GroupId(g), raws.iter().map(Vec::as_slice), now).unwrap();
     for case in v["invalid"].as_array().unwrap() {
         let raw = unhex(case["record"].as_str().unwrap());
-        assert_eq!(format!("{:?}", log.check(&raw, now).unwrap_err()), case["error"].as_str().unwrap());
+        assert_eq!(
+            format!("{:?}", log.check(&raw, now).unwrap_err()),
+            case["error"].as_str().unwrap()
+        );
     }
     for case in v["accept"].as_array().unwrap() {
-        log.check(&unhex(case["record"].as_str().unwrap()), now).unwrap();
+        log.check(&unhex(case["record"].as_str().unwrap()), now)
+            .unwrap();
     }
 }

@@ -73,4 +73,4 @@ pktmon stop; pktmon etl2txt idle.etl -o idle.txt         # sum the packet length
 
 | Date | Commit | Build | Private WS | Commit | Threads | CPU % | Net (proj./day) | Notes |
 |---|---|---|---|---|---|---|---|---|
-| – | – | – | – | – | – | – | – | Spike B will fill the first row |
+| 2026-10-09 | Spike B (`spikes/agent-skeleton`) | release, 1.2 MB exe | 0.69 MB max | 1.89 MB max | 5 max | 0 | ≈ 78 KB TLS payload, ≈ 250 KB with TCP/IP headers (K = 60 s) | tray + hotkey + hibernating-DO WebSocket over rustls/ring, EcoQoS, trim after connect; 10 min of samples after 60 s warm-up |

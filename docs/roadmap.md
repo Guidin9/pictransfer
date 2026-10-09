@@ -21,7 +21,7 @@ connection (`docs/dev-setup.md`).
   name `warpshot`. Binaries: `warpshot-agent.exe`, `warpshot-ui.exe`, `warpctl`.
 - [ ] **F0-6** `[DL]` Spike A — iroh on demand (`docs/spikes.md`). Windows part done
   2026-10-09; the Android and cross-network rows run with Spike D on the phone.
-- [ ] **F0-7** `[DL]` Spike B — agent skeleton vs the idle budget; first row in
+- [x] **F0-7** `[DL]` Spike B — agent skeleton vs the idle budget; first row in
   `resource-budget.md` §4.
 - [ ] **F0-8** `[DL]` Spike C — DO keepalive. Set K in protocol §6.3.
 - [ ] **F0-9** `[DL]` Spike D — Android wake path on the user's phone.
@@ -34,10 +34,10 @@ connection (`docs/dev-setup.md`).
 
 | Id | Task | Acceptance |
 |---|---|---|
-| C1 | Strict CBOR helpers (limits, rejection rules) + fuzz target | `cbor-reject.json` passes; 10 min of fuzzing clean |
+| C1 ✓ | Strict CBOR helpers (limits, rejection rules) + fuzz target | `cbor-reject.json` passes; 10 min of fuzzing clean |
 | C2 | Keys and keystore trait (DPAPI impl in the agent; Android via an FFI callback) | round-trip tests; keys never appear in `Debug` output |
-| C3 | Membership log: records, §4.3 validation, state, append/CAS logic, fork detection | `record.json` vectors; property tests (random ops, forks, re-adds) |
-| C4 | Wake envelopes §7: seal/open, replay cache | `wake.json` vectors; every tamper case rejected |
+| C3 ✓ | Membership log: records, §4.3 validation, state, append/CAS logic, fork detection | `record.json` vectors; property tests (random ops, forks, re-adds) |
+| C4 ✓ | Wake envelopes §7: seal/open, replay cache | `wake.json` vectors; every tamper case rejected |
 | C5 | Server client: §6.1 auth, REST, WebSocket (keepalive, backoff, resume) | `server-auth.json`; integration test against `wrangler dev` |
 | C6 | Endpoint manager: on-demand bind, 30 s idle teardown, single relay, no address lookup, direct-only policy | unit tests + spike A numbers reproduced |
 | C7 | Transfer §8: handshake and key schedule, control messages, item streams, BLAKE3, temp file + atomic rename, name sanitization | `xfer-keys.json`; warpctl E2E with text, image and a 1 GB file; relay-only and direct-only modes |
