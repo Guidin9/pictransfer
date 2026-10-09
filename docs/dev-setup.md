@@ -97,3 +97,23 @@ Check the state with `(Get-MpComputerStatus).SmartAppControlState`.
 
 `sdkmanager` now prints a deprecation notice on stderr and lists packages as
 `ndk/X.Y.Z` (formerly `ndk;X.Y.Z`); `setup-dev.ps1 -Android` handles both.
+
+## 8. Personal deployment (server, PC, phone)
+
+1. Server: `powershell -ExecutionPolicy Bypass -File scripts\deploy-server.ps1`
+   deploys the Worker to the logged-in Cloudflare account, sets
+   `GROUP_CREATE_TOKEN` and writes `%LOCALAPPDATA%\Warpshot\config.json`
+   (server URL + token; never committed, ADR 0007). Add `-FcmKey <json>` once
+   the Firebase service-account key exists.
+2. PC: `cargo build --release -p warpshot-agent`, then in `apps\windows-ui`
+   `npx tauri build --no-bundle`, then
+   `powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1`
+   (per user, no admin; `-Uninstall` removes it and keeps the data).
+3. Phone: `powershell -ExecutionPolicy Bypass -File apps\android\build-rust.ps1`,
+   then `apps\android\gradlew assembleRelease` (JAVA_HOME = Android Studio's
+   `jbr`) and install `app\build\outputs\apk\release\app-release.apk`.
+4. Pair: tray icon → Settings → Pair, scan the QR with the app, compare the code.
+
+Agent end-to-end test without a phone: start `npx wrangler dev --local --port 8787`
+in `server\`, build `-p warpshot-agent -p warpshot-ffi --example phone_sim`, then
+`node scripts\e2e-agent.mjs`.
