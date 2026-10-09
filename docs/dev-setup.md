@@ -70,3 +70,30 @@ cargo --version
 cargo new $env:TEMP\pt-hello; cargo run --manifest-path $env:TEMP\pt-hello\Cargo.toml   # builds & links without extra downloads
 node --version     # ≥ 22 (built-in WebSocket used by spike C)
 ```
+
+## 6. Smart App Control blocks fresh build outputs
+
+With Windows 11 Smart App Control **on**, the code-integrity policy refuses to run
+unsigned executables without cloud reputation — which is every build script, test
+binary and `pt-agent.exe` that `cargo` produces. Symptom (intermittent, a retry
+sometimes passes):
+
+```
+could not execute process `...\build\anyhow-...\build-script-build` (never executed)
+Uygulama Denetimi ilkesi bu dosyayı engelledi. (os error 4551)
+```
+
+Building elsewhere (WSL2, a VM, CI) does not help: the agent and its idle
+measurements must run on this machine. Signing every build output is impractical.
+Turn Smart App Control off on the development machine: Settings → Privacy &
+security → Windows Security → App & browser control → Smart App Control. Since
+the April 2026 cumulative update (KB5083769) it can be turned back on from the
+same page without reinstalling Windows; only the automatic evaluation mode is lost.
+Defender antivirus and SmartScreen stay on.
+
+Check the state with `(Get-MpComputerStatus).SmartAppControlState`.
+
+## 7. Android SDK notes
+
+`sdkmanager` now prints a deprecation notice on stderr and lists packages as
+`ndk/X.Y.Z` (formerly `ndk;X.Y.Z`); `setup-dev.ps1 -Android` handles both.

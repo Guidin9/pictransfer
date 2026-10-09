@@ -11,7 +11,7 @@ connection (`docs/dev-setup.md`).
   protocol, threat model, resource budget, spikes, ADRs, dev setup).
 - [x] **F0-2** `scripts/setup-dev.ps1` (dry run tested) and `scripts/measure-idle.ps1`
   (tested on Windows PowerShell 5.1: over-budget and within-budget cases).
-- [ ] **F0-3** `[DL]` Run `setup-dev.ps1` on a fast connection.
+- [x] **F0-3** `[DL]` Run `setup-dev.ps1` on a fast connection.
   Acceptance: the verification block shows MSVC installed and rustc with host
   `x86_64-pc-windows-msvc`; `cargo new` + `cargo run` works.
 - [ ] **F0-4** Accounts (user): Cloudflare (`npx wrangler login`); a Firebase

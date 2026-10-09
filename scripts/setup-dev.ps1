@@ -138,17 +138,24 @@ if ($Android) {
             # 'sdkmanager --list' fetches the repository index from Google, so it is skipped in a dry run.
             Write-Host '    [dry-run] would run: sdkmanager --list, then install the newest stable ndk;X.Y.Z (~1 GB)' -ForegroundColor Yellow
         } else {
+            # sdkmanager writes warnings (e.g. its deprecation notice) to stderr; with 'Stop',
+            # PowerShell 5.1 turns any native stderr line into a terminating error.
+            $ErrorActionPreference = 'Continue'
             $list = & $sdkmanager --list 2>$null
+            # Older sdkmanager lists 'ndk;X.Y.Z'; the Android-CLI-backed one lists 'ndk/X.Y.Z'.
+            $sep = ';'
             $versions = @($list | ForEach-Object {
-                    if ($_ -match '^\s*ndk;(\d+\.\d+\.\d+)\s') { [version]$Matches[1] }
+                    if ($_ -match '^\s*ndk([;/])(\d+\.\d+\.\d+)\s') { $sep = $Matches[1]; [version]$Matches[2] }
                 } | Sort-Object -Unique -Descending)
-            if ($versions.Count -eq 0) { throw 'Could not find any stable ndk;* package in sdkmanager --list.' }
-            $ndk = "ndk;$($versions[0])"
+            if ($versions.Count -eq 0) { throw 'Could not find any stable ndk package in sdkmanager --list.' }
+            $ndk = "ndk$sep$($versions[0])"
             Invoke-Step "sdkmanager --install `"$ndk`" (~1 GB)" {
                 $yes = 1..20 | ForEach-Object { 'y' }
                 $yes | & $sdkmanager --licenses | Out-Null
                 & $sdkmanager --install $ndk
+                if ($LASTEXITCODE -ne 0) { throw "sdkmanager --install $ndk exited with $LASTEXITCODE" }
             }
+            $ErrorActionPreference = 'Stop'
         }
     }
     if (-not $env:ANDROID_HOME) {
