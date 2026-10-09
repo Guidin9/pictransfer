@@ -128,6 +128,11 @@ external audit.
    in the Windows UI and tray with progress and Cancel; cancellation in core
    (`net::xfer` aborts the stream, closes with a cancel code, cleans temp
    files on the receiver) exposed via FFI and `transfer.cancel` (docs/ipc.md).
+4c. **LAN speed (high priority):** a 258 MB video Android → PC took 27 min
+   (~167 KB/s) on the same LAN — the direct path dies (Windows "Public"
+   firewall) and everything goes through the public relay. Add the firewall
+   rule (local subnet, UDP, agent exe; one UAC prompt) and/or find why the
+   direct path drops; target LAN speed (tens of MB/s).
 5. **Windows UI history bug:** the "Klasörde göster" (reveal in folder)
    button overlaps the text behind it in the history list; fix the layout.
 6. **Security tests for key theft:** stolen-key scenario, revocation
