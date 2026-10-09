@@ -260,6 +260,12 @@ signed = "warpshot/server-auth/v1\0" ‖ METHOD ‖ "\n" ‖ PATH_AND_QUERY ‖ 
 sig    = Ed25519.Sign(IK, signed)
 ```
 
+The header is parsed strictly: exactly `WARP1 id=<…>, ts=<…>, sig=<…>` in this
+order with single spaces as shown; `id` is 32 bytes and `sig` 64 bytes in
+canonical base64url without padding; `ts` is decimal digits without sign or
+leading zeros. `ts` in `signed` is the same digit string. `PATH_AND_QUERY` is the
+request target exactly as sent (no normalization).
+
 The server MUST:
 - require `|now − ts| ≤ 120 s`;
 - reject a repeated `(id, ts, sig)` within that window;

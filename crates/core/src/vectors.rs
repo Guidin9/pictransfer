@@ -468,8 +468,127 @@ fn wake_vectors() -> J {
     })
 }
 
+fn server_auth_vectors() -> J {
+    use crate::server_auth::{self, MAX_SKEW_MS};
+    let ik = IdentityKey::from_secret(&[0xa1; 32]);
+    let reqs: [(&str, &str, &[u8]); 4] = [
+        ("POST", "/v1/groups", br#"{"genesis":"AAAA"}"#),
+        ("GET", "/v1/groups/R0dHR0dHR0dHR0dHR0dHRw/log?after=3", b""),
+        (
+            "PUT",
+            "/v1/groups/R0dHR0dHR0dHR0dHR0dHRw/push-token",
+            br#"{"provider":"fcm","token":"t"}"#,
+        ),
+        ("GET", "/v1/groups/R0dHR0dHR0dHR0dHR0dHRw/ws", b""),
+    ];
+    let valid: Vec<J> = reqs
+        .iter()
+        .map(|(m, p, body)| {
+            let canon = server_auth::canonical(m, p, NOW, body);
+            let header = server_auth::authorization(&ik, m, p, NOW, body);
+            let parsed = server_auth::parse(&header).unwrap();
+            assert!(server_auth::verify(&parsed, m, p, body, NOW));
+            json!({ "method": m, "path": p, "ts": NOW, "body_hex": hex(body), "signed_hex": hex(&canon), "authorization": header })
+        })
+        .collect();
+    let (m, p, body) = reqs[0];
+    let h = server_auth::authorization(&ik, m, p, NOW, body);
+    let parsed = server_auth::parse(&h).unwrap();
+    let mut reject = Vec::new();
+    for (name, now, method, path, b, ok) in [
+        ("accepted at +120 s", NOW + MAX_SKEW_MS, m, p, body, true),
+        ("accepted at -120 s", NOW - MAX_SKEW_MS, m, p, body, true),
+        (
+            "rejected at +120.001 s",
+            NOW + MAX_SKEW_MS + 1,
+            m,
+            p,
+            body,
+            false,
+        ),
+        (
+            "rejected at -120.001 s",
+            NOW - MAX_SKEW_MS - 1,
+            m,
+            p,
+            body,
+            false,
+        ),
+        ("different method", NOW, "PUT", p, body, false),
+        ("different path", NOW, m, "/v1/groups/", body, false),
+        (
+            "different body",
+            NOW,
+            m,
+            p,
+            &br#"{"genesis":"AAAB"}"#[..],
+            false,
+        ),
+    ] {
+        assert_eq!(
+            server_auth::verify(&parsed, method, path, b, now),
+            ok,
+            "{name}"
+        );
+        reject.push(json!({ "name": name, "authorization": h, "now_ms": now, "method": method, "path": path, "body_hex": hex(b), "accept": ok }));
+    }
+    let mut bad_sig = parsed.sig;
+    bad_sig[10] ^= 1;
+    let bad_sig_header = format!(
+        "WARP1 id={}, ts={NOW}, sig={}",
+        crate::b64u::encode(&parsed.id.0),
+        crate::b64u::encode(&bad_sig)
+    );
+    reject.push(json!({ "name": "signature bit flipped", "authorization": bad_sig_header, "now_ms": NOW, "method": m, "path": p, "body_hex": hex(body), "accept": false }));
+    let malformed: Vec<J> = [
+        ("wrong scheme", h.replace("WARP1 ", "WARP2 ")),
+        ("lowercase scheme", h.replace("WARP1 ", "warp1 ")),
+        ("missing space after comma", h.replace(", ts=", ",ts=")),
+        (
+            "ts with leading zero",
+            h.replace(&format!("ts={NOW}"), &format!("ts=0{NOW}")),
+        ),
+        (
+            "ts with plus sign",
+            h.replace(&format!("ts={NOW}"), &format!("ts=+{NOW}")),
+        ),
+        (
+            "fields out of order",
+            format!(
+                "WARP1 ts={NOW}, id={}, sig={}",
+                crate::b64u::encode(&parsed.id.0),
+                crate::b64u::encode(&parsed.sig)
+            ),
+        ),
+        ("trailing space", format!("{h} ")),
+        ("id with padding", h.replacen(", ts=", "=, ts=", 1)),
+        (
+            "sig 63 bytes",
+            format!(
+                "WARP1 id={}, ts={NOW}, sig={}",
+                crate::b64u::encode(&parsed.id.0),
+                crate::b64u::encode(&parsed.sig[..63])
+            ),
+        ),
+    ]
+    .into_iter()
+    .map(|(name, hdr)| {
+        assert!(server_auth::parse(&hdr).is_none(), "{name}");
+        json!({ "name": name, "authorization": hdr })
+    })
+    .collect();
+    json!({
+        "description": "Server request auth (protocol §6.1). Signer secret = 32 × 0xa1. 'valid': signed_hex and authorization MUST match exactly. 'verify': parse the header and check signature and clock against now_ms; 'accept' is the expected result (membership and replay are out of scope here). 'malformed': the header MUST be rejected by the parser.",
+        "endpoint_id": hex(&ik.endpoint_id().0),
+        "valid": valid,
+        "verify": reject,
+        "malformed": malformed,
+    })
+}
+
 fn all() -> Vec<(&'static str, J)> {
     vec![
+        ("server-auth.json", server_auth_vectors()),
         ("cbor-reject.json", cbor_reject()),
         ("record.json", record_vectors()),
         ("wake.json", wake_vectors()),

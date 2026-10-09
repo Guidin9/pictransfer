@@ -1,0 +1,150 @@
+{
+  "description": "Server request auth (protocol §6.1). Signer secret = 32 × 0xa1. 'valid': signed_hex and authorization MUST match exactly. 'verify': parse the header and check signature and clock against now_ms; 'accept' is the expected result (membership and replay are out of scope here). 'malformed': the header MUST be rejected by the parser.",
+  "endpoint_id": "bc7cbcb5636375fa1d82434d466724d92377f53b980695dd49d26d0ce12205a5",
+  "malformed": [
+    {
+      "authorization": "WARP2 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU, ts=1790000000000, sig=gXLdNA9a4qZjeV-oJAbn2BK82WL9A8gSTEYqaoeRGyzc7KCnL77-zLT_JSl5brGR6iPqyIed00mZZiZvCIhqBQ",
+      "name": "wrong scheme"
+    },
+    {
+      "authorization": "warp1 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU, ts=1790000000000, sig=gXLdNA9a4qZjeV-oJAbn2BK82WL9A8gSTEYqaoeRGyzc7KCnL77-zLT_JSl5brGR6iPqyIed00mZZiZvCIhqBQ",
+      "name": "lowercase scheme"
+    },
+    {
+      "authorization": "WARP1 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU,ts=1790000000000, sig=gXLdNA9a4qZjeV-oJAbn2BK82WL9A8gSTEYqaoeRGyzc7KCnL77-zLT_JSl5brGR6iPqyIed00mZZiZvCIhqBQ",
+      "name": "missing space after comma"
+    },
+    {
+      "authorization": "WARP1 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU, ts=01790000000000, sig=gXLdNA9a4qZjeV-oJAbn2BK82WL9A8gSTEYqaoeRGyzc7KCnL77-zLT_JSl5brGR6iPqyIed00mZZiZvCIhqBQ",
+      "name": "ts with leading zero"
+    },
+    {
+      "authorization": "WARP1 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU, ts=+1790000000000, sig=gXLdNA9a4qZjeV-oJAbn2BK82WL9A8gSTEYqaoeRGyzc7KCnL77-zLT_JSl5brGR6iPqyIed00mZZiZvCIhqBQ",
+      "name": "ts with plus sign"
+    },
+    {
+      "authorization": "WARP1 ts=1790000000000, id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU, sig=gXLdNA9a4qZjeV-oJAbn2BK82WL9A8gSTEYqaoeRGyzc7KCnL77-zLT_JSl5brGR6iPqyIed00mZZiZvCIhqBQ",
+      "name": "fields out of order"
+    },
+    {
+      "authorization": "WARP1 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU, ts=1790000000000, sig=gXLdNA9a4qZjeV-oJAbn2BK82WL9A8gSTEYqaoeRGyzc7KCnL77-zLT_JSl5brGR6iPqyIed00mZZiZvCIhqBQ ",
+      "name": "trailing space"
+    },
+    {
+      "authorization": "WARP1 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU=, ts=1790000000000, sig=gXLdNA9a4qZjeV-oJAbn2BK82WL9A8gSTEYqaoeRGyzc7KCnL77-zLT_JSl5brGR6iPqyIed00mZZiZvCIhqBQ",
+      "name": "id with padding"
+    },
+    {
+      "authorization": "WARP1 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU, ts=1790000000000, sig=gXLdNA9a4qZjeV-oJAbn2BK82WL9A8gSTEYqaoeRGyzc7KCnL77-zLT_JSl5brGR6iPqyIed00mZZiZvCIhq",
+      "name": "sig 63 bytes"
+    }
+  ],
+  "valid": [
+    {
+      "authorization": "WARP1 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU, ts=1790000000000, sig=gXLdNA9a4qZjeV-oJAbn2BK82WL9A8gSTEYqaoeRGyzc7KCnL77-zLT_JSl5brGR6iPqyIed00mZZiZvCIhqBQ",
+      "body_hex": "7b2267656e65736973223a2241414141227d",
+      "method": "POST",
+      "path": "/v1/groups",
+      "signed_hex": "7761727073686f742f7365727665722d617574682f763100504f53540a2f76312f67726f7570730a313739303030303030303030300a35346536663962313930623838376339303138303230376237326338663533313636633337356239313865376530663762633935643464353534643032366463",
+      "ts": 1790000000000
+    },
+    {
+      "authorization": "WARP1 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU, ts=1790000000000, sig=GmqbmTdBjOOOQ4wLgK0_Lh1F-_ArgHsfxkAmsCiN_JDIG5Uuf4WnCU86HQ7QGRqNkNrAbLI9Zv7ucoWeqptBDg",
+      "body_hex": "",
+      "method": "GET",
+      "path": "/v1/groups/R0dHR0dHR0dHR0dHR0dHRw/log?after=3",
+      "signed_hex": "7761727073686f742f7365727665722d617574682f7631004745540a2f76312f67726f7570732f523064485230644852306448523064485230644852772f6c6f673f61667465723d330a313739303030303030303030300a65336230633434323938666331633134396166626634633839393666623932343237616534316534363439623933346361343935393931623738353262383535",
+      "ts": 1790000000000
+    },
+    {
+      "authorization": "WARP1 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU, ts=1790000000000, sig=QXD8YWFMyQQNUYyjKk-GmjkKZV-bBY8w0qK4sohbztusvh7OxFHKS2V54TKJqrvMyod6yMbTmq8yKv8KmpF6DQ",
+      "body_hex": "7b2270726f7669646572223a2266636d222c22746f6b656e223a2274227d",
+      "method": "PUT",
+      "path": "/v1/groups/R0dHR0dHR0dHR0dHR0dHRw/push-token",
+      "signed_hex": "7761727073686f742f7365727665722d617574682f7631005055540a2f76312f67726f7570732f523064485230644852306448523064485230644852772f707573682d746f6b656e0a313739303030303030303030300a65303965666131643461626232636332316433633663636430366634363166336633383135356437336661613936383061613562363734363331363864623662",
+      "ts": 1790000000000
+    },
+    {
+      "authorization": "WARP1 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU, ts=1790000000000, sig=GLTUPOBZA7ZrpXUVhC92Nm2apyraFxSS-V0RRYHr0IlgO4Ap7JsumGoiazcTqRpHjXLwurke8pMA7XbiH156DA",
+      "body_hex": "",
+      "method": "GET",
+      "path": "/v1/groups/R0dHR0dHR0dHR0dHR0dHRw/ws",
+      "signed_hex": "7761727073686f742f7365727665722d617574682f7631004745540a2f76312f67726f7570732f523064485230644852306448523064485230644852772f77730a313739303030303030303030300a65336230633434323938666331633134396166626634633839393666623932343237616534316534363439623933346361343935393931623738353262383535",
+      "ts": 1790000000000
+    }
+  ],
+  "verify": [
+    {
+      "accept": true,
+      "authorization": "WARP1 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU, ts=1790000000000, sig=gXLdNA9a4qZjeV-oJAbn2BK82WL9A8gSTEYqaoeRGyzc7KCnL77-zLT_JSl5brGR6iPqyIed00mZZiZvCIhqBQ",
+      "body_hex": "7b2267656e65736973223a2241414141227d",
+      "method": "POST",
+      "name": "accepted at +120 s",
+      "now_ms": 1790000120000,
+      "path": "/v1/groups"
+    },
+    {
+      "accept": true,
+      "authorization": "WARP1 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU, ts=1790000000000, sig=gXLdNA9a4qZjeV-oJAbn2BK82WL9A8gSTEYqaoeRGyzc7KCnL77-zLT_JSl5brGR6iPqyIed00mZZiZvCIhqBQ",
+      "body_hex": "7b2267656e65736973223a2241414141227d",
+      "method": "POST",
+      "name": "accepted at -120 s",
+      "now_ms": 1789999880000,
+      "path": "/v1/groups"
+    },
+    {
+      "accept": false,
+      "authorization": "WARP1 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU, ts=1790000000000, sig=gXLdNA9a4qZjeV-oJAbn2BK82WL9A8gSTEYqaoeRGyzc7KCnL77-zLT_JSl5brGR6iPqyIed00mZZiZvCIhqBQ",
+      "body_hex": "7b2267656e65736973223a2241414141227d",
+      "method": "POST",
+      "name": "rejected at +120.001 s",
+      "now_ms": 1790000120001,
+      "path": "/v1/groups"
+    },
+    {
+      "accept": false,
+      "authorization": "WARP1 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU, ts=1790000000000, sig=gXLdNA9a4qZjeV-oJAbn2BK82WL9A8gSTEYqaoeRGyzc7KCnL77-zLT_JSl5brGR6iPqyIed00mZZiZvCIhqBQ",
+      "body_hex": "7b2267656e65736973223a2241414141227d",
+      "method": "POST",
+      "name": "rejected at -120.001 s",
+      "now_ms": 1789999879999,
+      "path": "/v1/groups"
+    },
+    {
+      "accept": false,
+      "authorization": "WARP1 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU, ts=1790000000000, sig=gXLdNA9a4qZjeV-oJAbn2BK82WL9A8gSTEYqaoeRGyzc7KCnL77-zLT_JSl5brGR6iPqyIed00mZZiZvCIhqBQ",
+      "body_hex": "7b2267656e65736973223a2241414141227d",
+      "method": "PUT",
+      "name": "different method",
+      "now_ms": 1790000000000,
+      "path": "/v1/groups"
+    },
+    {
+      "accept": false,
+      "authorization": "WARP1 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU, ts=1790000000000, sig=gXLdNA9a4qZjeV-oJAbn2BK82WL9A8gSTEYqaoeRGyzc7KCnL77-zLT_JSl5brGR6iPqyIed00mZZiZvCIhqBQ",
+      "body_hex": "7b2267656e65736973223a2241414141227d",
+      "method": "POST",
+      "name": "different path",
+      "now_ms": 1790000000000,
+      "path": "/v1/groups/"
+    },
+    {
+      "accept": false,
+      "authorization": "WARP1 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU, ts=1790000000000, sig=gXLdNA9a4qZjeV-oJAbn2BK82WL9A8gSTEYqaoeRGyzc7KCnL77-zLT_JSl5brGR6iPqyIed00mZZiZvCIhqBQ",
+      "body_hex": "7b2267656e65736973223a2241414142227d",
+      "method": "POST",
+      "name": "different body",
+      "now_ms": 1790000000000,
+      "path": "/v1/groups"
+    },
+    {
+      "accept": false,
+      "authorization": "WARP1 id=vHy8tWNjdfodgkNNRmck2SN39TuYBpXdSdJtDOEiBaU, ts=1790000000000, sig=gXLdNA9a4qZjeV6oJAbn2BK82WL9A8gSTEYqaoeRGyzc7KCnL77-zLT_JSl5brGR6iPqyIed00mZZiZvCIhqBQ",
+      "body_hex": "7b2267656e65736973223a2241414141227d",
+      "method": "POST",
+      "name": "signature bit flipped",
+      "now_ms": 1790000000000,
+      "path": "/v1/groups"
+    }
+  ]
+}
