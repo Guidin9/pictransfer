@@ -1,8 +1,13 @@
 package io.github.guidin9.warpshot
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -75,7 +80,18 @@ fun MainScreen() {
         runCatching { core.sync() }
         devices = runCatching { core.devices() }.getOrDefault(emptyList())
     }
+    val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     LaunchedEffect(Unit) { refresh() }
+    // Once paired: register for push wake-ups and ask to show "received" notifications.
+    LaunchedEffect(devices.any { !it.me }) {
+        if (devices.none { !it.me }) return@LaunchedEffect
+        Push.ensureRegistered(ctx)
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     val pcs = devices.filter { !it.me }
 
     fun scanAndPair() {

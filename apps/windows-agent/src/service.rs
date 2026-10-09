@@ -867,32 +867,47 @@ impl Service {
         let n = self.next_transfer.fetch_add(1, Ordering::Relaxed);
         let res = self.send(target.as_deref(), items).await;
         let (ok, code) = match &res {
-            Ok(()) => (true, None),
+            Ok(_) => (true, None),
             Err(c) => (false, Some(c.clone())),
         };
         self.emit(
             "transfer.done",
             json!({"transfer": n.to_string(), "ok": ok, "code": code}),
         );
-        if let Err(c) = res {
-            let body = match c.as_str() {
-                "offline" => "The device is offline and can't be woken up right now.".to_owned(),
-                "no-answer" => "The device didn't respond (battery restrictions?).".to_owned(),
-                "not-paired" => "Pair a device first (tray icon → Settings).".to_owned(),
-                other => format!("Sending failed ({other})."),
-            };
-            self.toast("Not sent", &body);
+        match res {
+            Ok(to) => {
+                // Hotkey sends have no other UI: confirm quietly.
+                let name = self
+                    .others()
+                    .await
+                    .into_iter()
+                    .find(|(id, _)| *id == to)
+                    .map(|(_, (n, _))| n)
+                    .unwrap_or_else(|| "your device".into());
+                self.toast("Sent", &format!("Sent to {name}."));
+            }
+            Err(c) => {
+                let body = match c.as_str() {
+                    "offline" => {
+                        "The device is offline and can't be woken up right now.".to_owned()
+                    }
+                    "no-answer" => "The device didn't respond (battery restrictions?).".to_owned(),
+                    "not-paired" => "Pair a device first (tray icon → Settings).".to_owned(),
+                    other => format!("Sending failed ({other})."),
+                };
+                self.toast("Not sent", &body);
+            }
         }
         power::trim_working_set();
         ok
     }
 
-    /// Sends items: wake the target, then wait for it to dial in (§7.4).
+    /// Sends items: wake the target, then wait for it to dial in (§7.4). Returns the target.
     async fn send(
         self: &Arc<Self>,
         target: Option<&str>,
         items: Vec<OutItem>,
-    ) -> Result<(), String> {
+    ) -> Result<EndpointId, String> {
         let _one_at_a_time = self.send_lock.lock().await;
         let target = self.resolve_target(target).await?;
         let (ep, _lease) = self.mgr.acquire().await.map_err(|e| net_code(&e))?;
@@ -970,7 +985,7 @@ impl Service {
             }
             self.emit("history.changed", json!({}));
             return if results.iter().all(|(_, ok)| *ok) {
-                Ok(())
+                Ok(target)
             } else {
                 Err("rejected".into())
             };
@@ -1161,6 +1176,7 @@ impl Service {
                                     "me": *id == me,
                                     "online": *id == me || pr.is_some_and(|x| x.online),
                                     "last_seen": pr.and_then(|x| x.last_seen),
+                                    "push": pr.is_some_and(|x| x.push),
                                     "default_target": hex(&id.0) == def,
                                 })
                             })

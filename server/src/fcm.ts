@@ -30,7 +30,10 @@ export function fcmConfig(serviceAccount: string | undefined, baseUrl: string | 
   if (serviceAccount === undefined || serviceAccount === "") return null;
   let sa: unknown;
   try {
-    sa = JSON.parse(serviceAccount);
+    // A BOM or surrounding whitespace can come with the secret depending on how it
+    // was piped into `wrangler secret put` (a PowerShell pipe prepends a BOM);
+    // JSON.parse rejects a leading BOM, which silently disabled push wake-ups.
+    sa = JSON.parse(serviceAccount.replace(/^﻿/, "").trim());
   } catch {
     return null;
   }

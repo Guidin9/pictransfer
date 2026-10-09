@@ -1,9 +1,38 @@
 // Warpshot Android app. The Rust core (crates/ffi) is built with cargo-ndk into
 // src/main/jniLibs and its UniFFI Kotlin bindings into src/main/java/uniffi
 // (both generated, git-ignored): see apps/android/build-rust.ps1.
+import groovy.json.JsonSlurper
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+/**
+ * Firebase values from app/google-services.json (git-ignored, ADR 0007), as the
+ * string resources FirebaseApp reads at startup. This replaces the
+ * google-services Gradle plugin, which FCM alone doesn't need. Without the
+ * file the app builds and works, just without push wake-ups.
+ */
+fun firebaseValues(): Map<String, String> {
+    val f = file("google-services.json")
+    if (!f.exists()) return emptyMap()
+    @Suppress("UNCHECKED_CAST")
+    val json = JsonSlurper().parse(f) as Map<String, Any?>
+    val project = json["project_info"] as Map<String, Any?>
+    @Suppress("UNCHECKED_CAST")
+    val client = (json["client"] as List<Map<String, Any?>>).first {
+        val info = it["client_info"] as Map<String, Any?>
+        (info["android_client_info"] as Map<String, Any?>)["package_name"] == "io.github.guidin9.warpshot"
+    }
+    @Suppress("UNCHECKED_CAST")
+    val apiKey = (client["api_key"] as List<Map<String, Any?>>).first()["current_key"] as String
+    return mapOf(
+        "google_app_id" to ((client["client_info"] as Map<String, Any?>)["mobilesdk_app_id"] as String),
+        "google_api_key" to apiKey,
+        "gcm_defaultSenderId" to (project["project_number"] as String),
+        "project_id" to (project["project_id"] as String),
+    )
 }
 
 android {
@@ -17,6 +46,7 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         ndk { abiFilters += listOf("arm64-v8a") }
+        firebaseValues().forEach { (k, v) -> resValue("string", k, v) }
     }
 
     buildTypes {
@@ -30,7 +60,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        resValues = true
+    }
     packaging { jniLibs { useLegacyPackaging = false } }
 }
 
@@ -46,4 +79,6 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.18.1@aar")
     // QR scanning UI from Google Play services: no camera permission in the app.
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    // Push wake-ups (protocol §6.5): high-priority data messages only, no analytics.
+    implementation("com.google.firebase:firebase-messaging:24.1.0")
 }

@@ -36,11 +36,20 @@ try {
         [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
         $token = [Convert]::ToBase64String($bytes).TrimEnd("=").Replace("+", "-").Replace("/", "_")
     }
-    $token | npx.cmd wrangler secret put GROUP_CREATE_TOKEN
-    if ($LASTEXITCODE -ne 0) { throw "setting GROUP_CREATE_TOKEN failed" }
+    # Secrets go in through cmd's `<` redirection, byte for byte: a PowerShell pipe
+    # into a native command can prepend a UTF-8 BOM, which broke the FCM JSON once.
+    $tmp = [System.IO.Path]::GetTempFileName()
+    try {
+        [System.IO.File]::WriteAllText($tmp, $token, (New-Object System.Text.UTF8Encoding $false))
+        cmd /c "npx wrangler secret put GROUP_CREATE_TOKEN < `"$tmp`""
+        if ($LASTEXITCODE -ne 0) { throw "setting GROUP_CREATE_TOKEN failed" }
+    } finally {
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+    }
 
     if ($FcmKey) {
-        Get-Content $FcmKey -Raw | npx.cmd wrangler secret put FCM_SERVICE_ACCOUNT
+        $key = (Resolve-Path $FcmKey).Path
+        cmd /c "npx wrangler secret put FCM_SERVICE_ACCOUNT < `"$key`""
         if ($LASTEXITCODE -ne 0) { throw "setting FCM_SERVICE_ACCOUNT failed" }
     }
 } finally {

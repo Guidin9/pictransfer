@@ -60,7 +60,7 @@ connection (`docs/dev-setup.md`).
 | S3 ✓ | Log store: §4.3 validation + CAS + `log` push | `record.json` vectors shared with core |
 | S4 ✓ | Wake routing (WS, else FCM HTTP v1 with cached OAuth token), rate limits | tests with a fake FCM endpoint |
 | S5 ✓ | Presence, push-token endpoints, removal handling (`bye`, token deletion) | tests |
-| S6 | Deploy (wrangler), secrets, `/v1/health` | health check on the free account |
+| S6 ✓ | Deploy (wrangler), secrets, `/v1/health` | health check on the free account |
 
 ### Windows agent (`apps/windows-agent`)
 
@@ -86,7 +86,7 @@ connection (`docs/dev-setup.md`).
 
 | Id | Task | Acceptance |
 |---|---|---|
-| A1 | Gradle project; Rust core via `cargo-ndk` + UniFFI; Keystore bridge | debug build on the phone |
+| A1 ✓ | Gradle project; Rust core via `cargo-ndk` + UniFFI; Keystore bridge | debug build on the phone |
 | A2 | Onboarding: QR scan, pairing confirmation, notification permission, battery guidance | pairs with warpctl and with the agent |
 | A3 | FCM → `TransferService` (dataSync FGS) → receive → outputs (MediaStore, clipboard, notification, history) | delivery in Doze, < 3 s on Wi-Fi |
 | A4 | `ShareActivity` + sharing shortcuts (the PC appears directly in the share sheet) | share an image from Gallery → PC clipboard |

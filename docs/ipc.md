@@ -23,7 +23,7 @@ The agent owns all state, keys and network access; the UI holds none of them.
 | Method | Params | Result |
 |---|---|---|
 | `status` | – | `{device: {id, name, platform}, paired: bool, server: "connected" \| "connecting" \| "offline", version}` |
-| `devices.list` | – | `[{id, name, platform, me, online, last_seen, default_target}]` |
+| `devices.list` | – | `[{id, name, platform, me, online, last_seen, push, default_target}]` (`push`: the server holds a push token, so the device can be woken) |
 | `devices.rename` | `{name}` (own device; appends `update`) | `{}` |
 | `devices.remove` | `{id, reason: "user" \| "lost-or-stolen" \| "not-me"}` | `{}` |
 | `devices.set_default` | `{id}` | `{}` |
