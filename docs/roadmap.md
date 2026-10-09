@@ -120,7 +120,12 @@ external audit.
    `transfer.progress` (docs/ipc.md).
 4. **Tray icon has no logo** (shows blank in hidden icons): load a real
    icon resource in `tray.rs`, embed it in the exe.
-5. Open: Doze/locked-phone delivery test; optional Windows firewall rule for
+5. **Windows UI history bug:** the "Klasörde göster" (reveal in folder)
+   button overlaps the text behind it in the history list; fix the layout.
+6. **Security tests for key theft:** stolen-key scenario, revocation
+   ("lost or stolen") refusal, whether past transfers stay safe (forward
+   secrecy) — add to the security plan below.
+7. Open: Doze/locked-phone delivery test; optional Windows firewall rule for
    LAN (direct path); iroh transient threads after transfers; delete the
    orphaned first Firebase key; redeploy the server (BOM-tolerant FCM
    parse); push to GitHub.
