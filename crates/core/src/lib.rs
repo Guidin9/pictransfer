@@ -5,6 +5,7 @@ pub mod b64u;
 pub mod cbor;
 pub mod keys;
 pub mod log;
+pub mod pair;
 pub mod server_auth;
 #[cfg(test)]
 mod vectors;

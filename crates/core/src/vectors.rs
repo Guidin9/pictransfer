@@ -601,8 +601,127 @@ fn server_auth_vectors() -> J {
     })
 }
 
+fn pair_vectors() -> J {
+    use crate::{
+        keys::EndpointId,
+        pair::{self, QrPayload},
+        wake::DialInfo,
+    };
+    use zeroize::Zeroizing;
+    let display = IdentityKey::from_secret(&[0xa1; 32]).endpoint_id();
+    let scanner = IdentityKey::from_secret(&[0xb2; 32]).endpoint_id();
+    let qr = QrPayload {
+        eid: display,
+        dial: DialInfo {
+            relay: Some("https://euc1-1.relay.n0.iroh.link./".into()),
+            addrs: vec!["192.168.1.20:41234".parse().unwrap()],
+        },
+        secret: Zeroizing::new([0x5c; 32]),
+        exp: NOW / 1000 + 120,
+        name: "desk-pc".into(),
+        group: Some(GroupId(GROUP)),
+        server: None,
+    };
+    let text = qr.encode();
+    assert_eq!(QrPayload::parse(&text).unwrap(), qr);
+    let ekm = [0xe7; 32];
+    let proof = pair::proof(&qr.secret, &ekm, &scanner);
+    assert!(pair::verify_proof(&qr.secret, &ekm, &scanner, &proof));
+    assert!(!pair::verify_proof(
+        &qr.secret,
+        &ekm,
+        &EndpointId([0; 32]),
+        &proof
+    ));
+    json!({
+        "description": "Pairing (protocol §5). 'qr_text' MUST decode to the listed fields and re-encode identically. proof = HMAC-SHA-256(secret, label ‖ ekm ‖ eid_scanner); sas = first 6 base32 chars of SHA-256(label ‖ ekm) as XXX-XXX.",
+        "qr_text": text,
+        "qr": {
+            "eid": hex(&display.0), "relay": "https://euc1-1.relay.n0.iroh.link./", "addrs": ["192.168.1.20:41234"],
+            "secret": hex(qr.secret.as_ref()), "exp": qr.exp, "name": "desk-pc", "group": hex(&GROUP),
+        },
+        "ekm": hex(&ekm),
+        "eid_scanner": hex(&scanner.0),
+        "proof": hex(&proof),
+        "sas": pair::sas(&ekm),
+        "qr_reject": [
+            { "name": "wrong prefix", "qr_text": text.replacen("WARP1:", "WARP2:", 1) },
+            { "name": "lower case base32", "qr_text": format!("WARP1:{}", text["WARP1:".len()..].to_lowercase()) },
+            { "name": "truncated", "qr_text": text[..text.len() - 3].to_string() },
+        ],
+    })
+}
+
+fn xfer_vectors() -> J {
+    use crate::xfer::{self, Ctrl, Dir, Hello, HelloAck, ItemSealer, KeySchedule};
+    let d = IdentityKey::from_secret(&[0xa1; 32]).endpoint_id();
+    let l = IdentityKey::from_secret(&[0xb2; 32]).endpoint_id();
+    let head = log::Head {
+        seq: 4,
+        id: log::RecordId([0x99; 32]),
+    };
+    let ek = xfer::EphemeralKem::from_seed([0x0e; 32]);
+    let hello = Hello {
+        session: [0x5e; 16],
+        ek: ek.public_key(),
+        head,
+        caps: vec![],
+    }
+    .encode();
+    let (ss, ct) = xfer::encapsulate_with(&Hello::parse(&hello).unwrap().ek, &[0x33; 64]).unwrap();
+    let ack = HelloAck {
+        ct,
+        head,
+        caps: vec![],
+    }
+    .encode();
+    let ss_d = ek.decapsulate(&HelloAck::parse(&ack).unwrap().ct).unwrap();
+    assert_eq!(*ss_d, *ss);
+    let ekm = [0xe7; 32];
+    let th = xfer::transcript(&hello, &ack, &d, &l);
+    let ks = KeySchedule::new(&ss, &ekm, th);
+    let mut ctrl = ks.ctrl(Dir::Ld);
+    let offer = Ctrl::Offer {
+        session: [0x5e; 16],
+        items: vec![xfer::Item {
+            id: 1,
+            kind: xfer::kind::TEXT,
+            name: "".into(),
+            mime: "text/plain;charset=utf-8".into(),
+            size: 5,
+            created_at: NOW,
+            text: Some("hello".into()),
+        }],
+    }
+    .encode();
+    let c0 = ctrl.seal(&offer).unwrap();
+    let c1 = ctrl.seal(&Ctrl::Bye.encode()).unwrap();
+    let mut item = ItemSealer::new(&ks, Dir::Ld, 7);
+    let chunk = item.seal(b"warpshot", true).unwrap();
+    json!({
+        "description": "Transfer key schedule (protocol §8.3–8.6). Dialer secret 32 × 0xa1, listener 32 × 0xb2; dialer ephemeral X-Wing seed 32 × 0x0e; listener encapsulation randomness 64 × 0x33; ekm given. Hello/HelloAck are the exact frame payloads.",
+        "eid_d": hex(&d.0),
+        "eid_l": hex(&l.0),
+        "hello": hex(&hello),
+        "hello_ack": hex(&ack),
+        "ss": hex(ss.as_ref()),
+        "ekm": hex(&ekm),
+        "th": hex(&th),
+        "k_ctrl_dl": hex(ks.ctrl_key(Dir::Dl).as_ref()),
+        "k_ctrl_ld": hex(ks.ctrl_key(Dir::Ld).as_ref()),
+        "k_item_ld_7": hex(ks.item_key(Dir::Ld, 7).as_ref()),
+        "ctrl_ld": [
+            { "counter": 0, "plaintext": hex(&offer), "ciphertext": hex(&c0) },
+            { "counter": 1, "plaintext": hex(&Ctrl::Bye.encode()), "ciphertext": hex(&c1) },
+        ],
+        "item_ld_7_last_chunk": { "index": 0, "plaintext": hex(b"warpshot"), "ciphertext": hex(&chunk) },
+    })
+}
+
 fn all() -> Vec<(&'static str, J)> {
     vec![
+        ("pair.json", pair_vectors()),
+        ("xfer-keys.json", xfer_vectors()),
         ("server-auth.json", server_auth_vectors()),
         ("cbor-reject.json", cbor_reject()),
         ("record.json", record_vectors()),
@@ -661,5 +780,22 @@ fn record_vectors_replay() {
     for case in v["accept"].as_array().unwrap() {
         log.check(&unhex(case["record"].as_str().unwrap()), now)
             .unwrap();
+    }
+}
+
+#[test]
+fn xwing_conformance() {
+    let v: J =
+        serde_json::from_str(&std::fs::read_to_string(dir().join("xwing.json")).unwrap()).unwrap();
+    for t in v["vectors"].as_array().unwrap() {
+        let h = |k: &str| unhex(t[k].as_str().unwrap());
+        let seed: [u8; 32] = h("seed").try_into().unwrap();
+        let eseed: [u8; 64] = h("eseed").try_into().unwrap();
+        let kk = KemKey::from_seed(&seed);
+        assert_eq!(kk.public_key(), h("pk"));
+        let (ss, ct) = crate::xfer::encapsulate_with(&h("pk"), &eseed).unwrap();
+        assert_eq!(ct, h("ct"));
+        assert_eq!(ss.to_vec(), h("ss"));
+        assert_eq!(kk.decapsulate(&ct).unwrap().to_vec(), h("ss"));
     }
 }

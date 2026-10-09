@@ -508,6 +508,7 @@ dependencies = [
  "ed25519-dalek",
  "getrandom",
  "hkdf",
+ "hmac",
  "serde_json",
  "sha2",
  "subtle",
