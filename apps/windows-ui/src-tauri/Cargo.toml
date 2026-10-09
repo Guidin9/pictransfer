@@ -1,0 +1,54 @@
+[package]
+name = "warpshot-ui"
+description = "Warpshot Windows settings UI (stateless; talks to warpshot-agent over a named pipe)"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/Guidin9/warpshot"
+publish = false
+
+# Standalone: excluded from the root workspace (Tauri pulls in a large
+# dependency tree that the agent must never link). Own Cargo.lock.
+[workspace]
+
+[[bin]]
+name = "warpshot-ui"
+path = "src/main.rs"
+
+[lints.rust]
+unsafe_code = "deny" # Win32 FFI lives in src/win.rs only (module-level allow)
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+
+[build-dependencies]
+tauri-build = { version = "2.7", default-features = false , features = [] }
+
+# Dependency review: tauri/serde/serde_json/tokio/windows-sys are MIT or
+# Apache-2.0 (GPL-3.0 compatible) and actively maintained. No Tauri plugins:
+# no http/shell/fs/opener/dialog (threat model T9). tokio here is Tauri's own
+# runtime; we only add the `net` named-pipe client and `io-util`/`sync`/`time`.
+[dependencies]
+tauri = { version = "2.12", default-features = false, features = ["wry", "compression", "common-controls-v6"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["net", "io-util", "sync", "time"] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
