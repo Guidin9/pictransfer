@@ -11,19 +11,21 @@
 //! ```
 //!
 //! Threads at idle: this UI thread (message loop) and one tokio `current_thread`
-//! runtime thread (named-pipe server; later the server WebSocket).
+//! runtime thread (named-pipe server, server WebSocket, transfers).
 
 #![windows_subsystem = "windows"]
 // Win32 FFI (window procedure, message loop) needs `unsafe`; see lib.rs.
 #![allow(unsafe_code)]
 
-use std::{cell::RefCell, process::ExitCode, sync::Arc};
+use std::{cell::RefCell, path::Path, process::ExitCode, sync::Arc};
 
-use serde_json::{Value, json};
+use tokio::sync::{broadcast, mpsc};
 use warpshot_agent::{
     clipboard,
     hotkey::{self, Hotkey},
-    pipe, power, selftest, single_instance, toast,
+    image, pipe, power, selftest,
+    service::{self, Cmd, Service, UiMsg},
+    single_instance, toast,
     tray::{self, MenuCommand, MenuModel, Tray},
     win::wide,
 };
@@ -35,18 +37,21 @@ use windows_sys::Win32::{
     },
     UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, MSG,
-        PostQuitMessage, RegisterClassW, TranslateMessage, WM_CLOSE, WM_DESTROY, WM_HOTKEY,
-        WM_LBUTTONUP, WM_RBUTTONUP, WNDCLASSW,
+        PostMessageW, PostQuitMessage, RegisterClassW, TranslateMessage, WM_APP, WM_CLOSE,
+        WM_DESTROY, WM_HOTKEY, WM_LBUTTONUP, WM_RBUTTONUP, WNDCLASSW,
     },
 };
 
 const HOTKEY_SEND: i32 = 1;
+/// A boxed [`UiMsg`] from the runtime thread; `lParam` owns the box.
+const WM_UI: u32 = WM_APP + 2;
 
 /// UI-thread state reachable from the window procedure.
 struct App {
     tray: Option<Tray>,
     menu: MenuModel,
     taskbar_created: u32,
+    cmd: mpsc::UnboundedSender<Cmd>,
 }
 
 thread_local! {
@@ -57,12 +62,42 @@ fn with_app<R>(f: impl FnOnce(&mut App) -> R) -> Option<R> {
     APP.with(|a| a.try_borrow_mut().ok().and_then(|mut a| a.as_mut().map(f)))
 }
 
-/// Hotkey pressed: read the clipboard. TODO(core): hand the content to the
-/// transfer layer instead of dropping it.
+fn show_toast(title: &str, body: &str, image: Option<&Path>) {
+    let _ = toast::show(&toast::Toast {
+        title,
+        body,
+        image,
+        id: None,
+    });
+}
+
+/// Hotkey pressed: read the clipboard and hand it to the transfer layer.
 fn on_hotkey(hwnd: HWND) {
-    let content = clipboard::read(hwnd);
-    drop(content); // released right away (resource-budget.md §2.6)
+    match clipboard::read(hwnd) {
+        Ok(Some(content)) => {
+            with_app(|a| a.cmd.send(Cmd::SendClip(content)));
+        }
+        Ok(None) => show_toast("Nothing to send", "The clipboard is empty.", None),
+        Err(_) => show_toast("Nothing sent", "The clipboard could not be read.", None),
+    }
     power::trim_working_set();
+}
+
+/// Opens `warpshot-ui.exe` (next to the agent) if it is installed.
+fn open_ui() {
+    let ui = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("warpshot-ui.exe")));
+    match ui {
+        Some(p) if p.is_file() => {
+            let _ = std::process::Command::new(p).spawn();
+        }
+        _ => show_toast(
+            "Warpshot",
+            "The settings window (warpshot-ui.exe) is not installed next to the agent.",
+            None,
+        ),
+    }
 }
 
 fn on_menu(hwnd: HWND, cmd: MenuCommand) {
@@ -72,11 +107,49 @@ fn on_menu(hwnd: HWND, cmd: MenuCommand) {
             unsafe { DestroyWindow(hwnd) };
         }
         MenuCommand::SetDefaultTarget(i) => {
-            with_app(|a| a.menu.default_target = Some(i)); // TODO(core): persist in settings
+            with_app(|a| {
+                a.menu.default_target = Some(i);
+                a.cmd.send(Cmd::SetDefaultIndex(i))
+            });
         }
-        // TODO(ui): launch warpshot-ui.exe (settings / device page).
-        MenuCommand::Settings | MenuCommand::Device(_) => {}
+        MenuCommand::Settings | MenuCommand::Device(_) => open_ui(),
     }
+}
+
+/// Applies a message from the runtime thread.
+fn on_ui_msg(hwnd: HWND, msg: UiMsg) {
+    match msg {
+        UiMsg::Toast { title, body, image } => show_toast(&title, &body, image.as_deref()),
+        UiMsg::ClipText(t) => {
+            let _ = clipboard::write_text(hwnd, &t);
+        }
+        UiMsg::ClipImage(path) => {
+            let png = std::fs::read(&path).ok().filter(|b| image::is_png(b));
+            let _ = match png {
+                Some(b) => clipboard::write_png(hwnd, &b),
+                None => clipboard::write_files(hwnd, &[path]),
+            };
+        }
+        UiMsg::ClipFiles(paths) => {
+            let _ = clipboard::write_files(hwnd, &paths);
+        }
+        UiMsg::Menu(m) => {
+            with_app(|a| a.menu = m);
+        }
+        UiMsg::Hotkey(s) => {
+            if let Ok(hk) = Hotkey::parse(&s) {
+                hotkey::unregister(hwnd, HOTKEY_SEND);
+                if hotkey::register(hwnd, HOTKEY_SEND, &hk).is_err() {
+                    show_toast(
+                        "Warpshot hotkey is taken",
+                        "Another app uses this hotkey. Choose a different one in Settings.",
+                        None,
+                    );
+                }
+            }
+        }
+    }
+    power::trim_working_set();
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -95,6 +168,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 }
                 WM_LBUTTONUP => on_menu(hwnd, MenuCommand::Settings),
                 _ => {}
+            }
+            0
+        }
+        WM_UI => {
+            if lp != 0 {
+                // SAFETY: `lp` is a `Box<UiMsg>` leaked by `post_ui` for exactly this message.
+                let msg = unsafe { Box::from_raw(lp as *mut UiMsg) };
+                on_ui_msg(hwnd, *msg);
             }
             0
         }
@@ -117,40 +198,35 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     }
 }
 
-/// Requests from warpshot-ui over the named pipe. TODO(core): JSON-RPC methods
-/// for pairing, devices, settings and history.
-struct AgentRpc;
-
-impl pipe::Handler for AgentRpc {
-    async fn call(&self, method: &str, params: Value) -> Result<Value, pipe::RpcError> {
-        match method {
-            "ping" => Ok(json!("pong")),
-            "agent.version" => Ok(json!(env!("CARGO_PKG_VERSION"))),
-            // Hotkey recorder: parse + AltGr check on the current and installed layouts.
-            "hotkey.check" => {
-                let s = params.get("hotkey").and_then(Value::as_str).unwrap_or("");
-                let hk = Hotkey::parse(s)
-                    .map_err(|e| pipe::RpcError::new(pipe::code::INVALID_PARAMS, &e.to_string()))?;
-                Ok(json!({
-                    "canonical": hk.to_string(),
-                    "altgr_current": hotkey::altgr_conflict_current(&hk).map(|o| o.to_string()),
-                    "altgr_layouts": hotkey::altgr_conflicts_installed(&hk)
-                        .into_iter()
-                        .map(|(id, o)| json!({ "layout": format!("{id:08X}"), "produces": o.to_string() }))
-                        .collect::<Vec<_>>(),
-                }))
-            }
-            _ => Err(pipe::RpcError::method_not_found()),
-        }
+/// Posts a [`UiMsg`] to the UI thread (`hwnd` as an integer so the closure is `Send`).
+fn post_ui(hwnd: usize, msg: UiMsg) {
+    let p = Box::into_raw(Box::new(msg));
+    // SAFETY: posting to our own window; on success the window procedure takes the box.
+    let ok = unsafe { PostMessageW(hwnd as HWND, WM_UI, 0, p as isize) };
+    if ok == 0 {
+        // SAFETY: not posted, so we still own the box.
+        drop(unsafe { Box::from_raw(p) });
     }
 }
 
-/// The one extra thread: a `current_thread` tokio runtime for the pipe server.
-fn spawn_runtime_thread() {
+fn post_toast(hwnd: usize, title: &str, body: String) {
+    post_ui(
+        hwnd,
+        UiMsg::Toast {
+            title: title.into(),
+            body,
+            image: None,
+        },
+    );
+}
+
+/// The one extra thread: a `current_thread` tokio runtime for the pipe server,
+/// the server WebSocket and transfers.
+fn spawn_runtime_thread(hwnd: usize, mut cmds: mpsc::UnboundedReceiver<Cmd>) {
     let spawned = std::thread::Builder::new()
         .name("warpshot-rt".into())
-        .stack_size(256 * 1024)
-        .spawn(|| {
+        .stack_size(1024 * 1024)
+        .spawn(move || {
             let Ok(rt) = tokio::runtime::Builder::new_current_thread()
                 .enable_io()
                 .enable_time()
@@ -158,14 +234,32 @@ fn spawn_runtime_thread() {
             else {
                 return;
             };
-            rt.block_on(async {
-                let Ok(name) = pipe::pipe_name() else { return };
-                // A failed bind means another agent or a squatter owns the name.
-                // TODO(core): log the error code and tell the user.
-                let Ok(server) = pipe::PipeServer::bind(&name) else {
-                    return;
+            rt.block_on(async move {
+                let (events, _) = broadcast::channel(64);
+                let sink = Box::new(move |m| post_ui(hwnd, m));
+                let svc = match Service::open(sink, events.clone()) {
+                    Ok(s) => s,
+                    Err(code) => {
+                        post_toast(hwnd, "Warpshot could not start", format!("Error: {code}"));
+                        return;
+                    }
                 };
-                let _ = server.serve(Arc::new(AgentRpc)).await;
+                svc.start().await;
+                // A failed bind means another agent or a squatter owns the name.
+                match pipe::pipe_name().and_then(|n| pipe::PipeServer::bind(&n)) {
+                    Ok(server) => {
+                        let rpc = Arc::new(service::Rpc(Arc::clone(&svc)));
+                        tokio::spawn(server.serve(rpc, events));
+                    }
+                    Err(_) => post_toast(
+                        hwnd,
+                        "Warpshot",
+                        "The settings channel is unavailable (pipe-in-use).".into(),
+                    ),
+                }
+                while let Some(cmd) = cmds.recv().await {
+                    svc.on_cmd(cmd).await;
+                }
             });
         });
     drop(spawned);
@@ -213,15 +307,17 @@ fn run_agent() -> ExitCode {
         return ExitCode::FAILURE;
     };
     let tray = Tray::add(hwnd, "Warpshot").ok();
+    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
     APP.with(|a| {
         *a.borrow_mut() = Some(App {
             tray,
             menu: MenuModel::default(),
             taskbar_created: tray::taskbar_created_message(),
+            cmd: cmd_tx,
         });
     });
 
-    // TODO(core): the hotkey comes from settings.
+    // The default hotkey; the service sends `UiMsg::Hotkey` if settings differ.
     if let Ok(hk) = Hotkey::parse(hotkey::DEFAULT_HOTKEY)
         && let Err(hotkey::RegisterError::Taken) = hotkey::register(hwnd, HOTKEY_SEND, &hk)
     {
@@ -232,7 +328,7 @@ fn run_agent() -> ExitCode {
         });
     }
 
-    spawn_runtime_thread();
+    spawn_runtime_thread(hwnd as usize, cmd_rx);
     power::set_eco_qos(true);
     power::trim_working_set();
 

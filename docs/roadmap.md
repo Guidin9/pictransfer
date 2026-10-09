@@ -23,7 +23,7 @@ connection (`docs/dev-setup.md`).
   2026-10-09; the Android and cross-network rows run with Spike D on the phone.
 - [x] **F0-7** `[DL]` Spike B — agent skeleton vs the idle budget; first row in
   `resource-budget.md` §4.
-- [ ] **F0-8** `[DL]` Spike C — DO keepalive. Set K in protocol §6.3.
+- [x] **F0-8** `[DL]` Spike C — DO keepalive. Set K in protocol §6.3.
 - [ ] **F0-9** `[DL]` Spike D — Android wake path on the user's phone.
 - [x] **F0-10** ADR 0008, crate choices: X-Wing implementation, CBOR crate
   (`minicbor` vs `ciborium`, judged by strict-decoding support), SQLite binding.
@@ -55,23 +55,23 @@ connection (`docs/dev-setup.md`).
 
 | Id | Task | Acceptance |
 |---|---|---|
-| S1 | Worker router + DO skeleton (SQLite schema, Hibernation API, auto-response) | vitest (workers pool) |
-| S2 | §6.1 auth + replay cache (WebCrypto Ed25519) + operator admission token | `server-auth.json` vectors; group creation without/with a wrong token → 403 `not-allowed` |
-| S3 | Log store: §4.3 validation + CAS + `log` push | `record.json` vectors shared with core |
-| S4 | Wake routing (WS, else FCM HTTP v1 with cached OAuth token), rate limits | tests with a fake FCM endpoint |
-| S5 | Presence, push-token endpoints, removal handling (`bye`, token deletion) | tests |
+| S1 ✓ | Worker router + DO skeleton (SQLite schema, Hibernation API, auto-response) | vitest (workers pool) |
+| S2 ✓ | §6.1 auth + replay cache (WebCrypto Ed25519) + operator admission token | `server-auth.json` vectors; group creation without/with a wrong token → 403 `not-allowed` |
+| S3 ✓ | Log store: §4.3 validation + CAS + `log` push | `record.json` vectors shared with core |
+| S4 ✓ | Wake routing (WS, else FCM HTTP v1 with cached OAuth token), rate limits | tests with a fake FCM endpoint |
+| S5 ✓ | Presence, push-token endpoints, removal handling (`bye`, token deletion) | tests |
 | S6 | Deploy (wrangler), secrets, `/v1/health` | health check on the free account |
 
 ### Windows agent (`apps/windows-agent`)
 
 | Id | Task | Acceptance |
 |---|---|---|
-| W1 | Message loop, tray (devices + status, default-target radio, settings, quit), single instance | manual check; idle budget |
+| W1 ✓ | Message loop, tray (devices + status, default-target radio, settings, quit), single instance | manual check; idle budget |
 | W2 | Global hotkey + AltGr conflict check; toast if the hotkey is taken | TR-Q: `Ctrl+Alt+Q` flagged |
-| W3 | Clipboard read (PNG, DIBV5, text, CF_HDROP) and write (PNG + DIBV5, text, CF_HDROP) | paste works in Paint, Word, Explorer |
+| W3 ✓ | Clipboard read (PNG, DIBV5, text, CF_HDROP) and write (PNG + DIBV5, text, CF_HDROP) | paste works in Paint, Word, Explorer |
 | W4 | WinRT toasts with preview + COM activator; Start Menu shortcut with AUMID | the action opens the right history item; no URL handler is registered |
-| W5 | Receive pipeline: save with MOTW, clipboard, toast, history | `Zone.Identifier` present; sanitization tests |
-| W6 | Named-pipe JSON-RPC server (user-SID ACL, remote clients rejected) | another local user is refused |
+| W5 ✓ | Receive pipeline: save with MOTW, clipboard, toast, history | `Zone.Identifier` present; sanitization tests |
+| W6 ✓ | Named-pipe JSON-RPC server (user-SID ACL, remote clients rejected) | another local user is refused |
 | W7 | Resource discipline: on-demand endpoint, working-set trim, EcoQoS | `measure-idle.ps1` within budget |
 | W8 | Autostart (HKCU Run) + per-user installer | clean install/uninstall, no admin rights |
 

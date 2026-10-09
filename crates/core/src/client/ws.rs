@@ -62,7 +62,7 @@ pub struct WsConfig {
 impl Default for WsConfig {
     fn default() -> Self {
         Self {
-            keepalive: Duration::from_secs(60),
+            keepalive: Duration::from_secs(120),
             backoff_initial: Duration::from_secs(1),
             backoff_max: Duration::from_secs(300),
             event_capacity: 32,

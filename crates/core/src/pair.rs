@@ -272,6 +272,16 @@ impl Window {
         })
     }
 
+    /// Adds the server URL (QR key 7) so the scanner learns where the group lives.
+    pub fn with_server(mut self, url: String) -> Self {
+        self.payload.server = Some(url);
+        self
+    }
+
+    pub fn expires_at_secs(&self) -> u64 {
+        self.payload.exp
+    }
+
     pub fn qr_text(&self) -> String {
         self.payload.encode()
     }

@@ -118,7 +118,7 @@ fn pipe_report() -> Value {
             Ok(s) => s,
             Err(e) => return err(e),
         };
-        tokio::spawn(server.serve(Arc::new(Echo)));
+        tokio::spawn(server.serve(Arc::new(Echo), tokio::sync::broadcast::channel(1).0));
         let t = Instant::now();
         let mut c = match pipe::PipeClient::connect(&name).await {
             Ok(c) => c,

@@ -31,8 +31,19 @@ pub async fn submit(client: &Client, records: &[Vec<u8>]) -> Result<Option<Head>
 pub async fn pull(client: &Client, log: &mut Log, now_ms: u64) -> Result<bool, NetError> {
     let after = log.head().map(|h| h.seq);
     let page = client.get_log(&log.group_id(), after).await?;
+    apply(log, &page.records, &page.head, now_ms)
+}
+
+/// Validates server records (from `GET /log` or a WebSocket `log` message) as a
+/// continuation of the local log and appends them. Returns true if it changed.
+pub fn apply(
+    log: &mut Log,
+    records: &[Vec<u8>],
+    head: &Head,
+    now_ms: u64,
+) -> Result<bool, NetError> {
     let mut changed = false;
-    for raw in &page.records {
+    for raw in records {
         let rec = log.check(raw, now_ms);
         match rec {
             Ok(r) => match log.classify(r.body.seq, &r.id) {
@@ -57,8 +68,8 @@ pub async fn pull(client: &Client, log: &mut Log, now_ms: u64) -> Result<bool, N
         }
     }
     if let Some(local) = log.head()
-        && page.head.seq == local.seq
-        && page.head.id != local.id
+        && head.seq == local.seq
+        && head.id != local.id
     {
         return Err(NetError::Fork);
     }

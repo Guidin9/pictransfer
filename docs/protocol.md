@@ -312,7 +312,7 @@ take it from build-time deployment config that is not committed (ADR 0007).
   socket with the Hibernation API and tags it with the device id.
 - **Keepalive:** the client sends the text frame `p` every `K` seconds. The server
   answers `o` through `setWebSocketAutoResponse`, without waking the object.
-  `K` is set by Spike C (default 60). After two missed `o` replies the client
+  `K` = 120 s (Spike C). After two missed `o` replies the client
   reconnects. It also reconnects on OS network-change and resume events.
   Backoff: 1, 2, 4 … up to 300 s, ±20 % jitter.
 - Client → server: `{"t":"wake","id":n,"to","env","ttl"}`, `{"t":"presence","id":n}`,

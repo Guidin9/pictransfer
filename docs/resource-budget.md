@@ -74,3 +74,4 @@ pktmon stop; pktmon etl2txt idle.etl -o idle.txt         # sum the packet length
 | Date | Commit | Build | Private WS | Commit | Threads | CPU % | Net (proj./day) | Notes |
 |---|---|---|---|---|---|---|---|---|
 | 2026-10-09 | Spike B (`spikes/agent-skeleton`) | release, 1.2 MB exe | 0.69 MB max | 1.89 MB max | 5 max | 0 | ≈ 78 KB TLS payload, ≈ 250 KB with TCP/IP headers (K = 60 s) | tray + hotkey + hibernating-DO WebSocket over rustls/ring, EcoQoS, trim after connect; 10 min of samples after 60 s warm-up |
+| 2026-10-09 | agent wired to core (W1–W7) | release, 5.6 MB exe | 1.68 MB max | 3.86 MB max | 6 steady, 9 max | 0.0004 | K = 120 s: 4 pings in 8 min | paired, WS to local `wrangler dev`, after pairing + 2 receives + 1 send. Without any iroh use: max 6, settles at 3. **Open:** after the iroh endpoint closes, OS thread-pool workers come and go (up to 9); suspect iroh's network-change registration outliving the endpoint. CPU stays ≈ 0. |

@@ -1,5 +1,5 @@
-//! Named-pipe JSON-RPC 2.0 (one JSON object per line) between the agent and
-//! `warpshot-ui`: `\\.\pipe\warpshot-<user SID>`.
+//! Named-pipe IPC (docs/ipc.md: one JSON object per line; requests, responses
+//! and unsolicited events) between the agent and `warpshot-ui`: `\\.\pipe\warpshot-<user SID>`.
 //!
 //! Threat model T9: the pipe's DACL grants access only to the current user SID
 //! (protected, so nothing is inherited), the owner is set to that SID, remote
@@ -28,6 +28,7 @@ use serde_json::{Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::windows::named_pipe::{ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions},
+    sync::broadcast,
 };
 use windows_sys::Win32::{
     Foundation::{ERROR_PIPE_BUSY, ERROR_SUCCESS},
@@ -48,13 +49,13 @@ pub const MAX_MESSAGE: usize = 1024 * 1024;
 pub const MAX_CLIENTS: usize = 8;
 const PIPE_BUFFER: u32 = 4096;
 
-/// JSON-RPC error codes.
+/// Error codes (docs/ipc.md).
 pub mod code {
-    pub const PARSE_ERROR: i64 = -32700;
-    pub const INVALID_REQUEST: i64 = -32600;
-    pub const METHOD_NOT_FOUND: i64 = -32601;
-    pub const INVALID_PARAMS: i64 = -32602;
-    pub const INTERNAL_ERROR: i64 = -32603;
+    pub const PARSE_ERROR: &str = "parse-error";
+    pub const INVALID_REQUEST: &str = "bad-request";
+    pub const METHOD_NOT_FOUND: &str = "unknown-method";
+    pub const INVALID_PARAMS: &str = "bad-params";
+    pub const INTERNAL_ERROR: &str = "internal";
 }
 
 /// The agent's pipe name for the current user.
@@ -62,18 +63,18 @@ pub fn pipe_name() -> io::Result<String> {
     Ok(format!(r"\\.\pipe\warpshot-{}", current_user_sid()?))
 }
 
-/// A JSON-RPC error object.
+/// An error object: `{code, message}`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RpcError {
-    pub code: i64,
+    pub code: String,
     /// Short, content-free message (error codes, not data).
     pub message: String,
 }
 
 impl RpcError {
-    pub fn new(code: i64, message: &str) -> RpcError {
+    pub fn new(code: &str, message: &str) -> RpcError {
         RpcError {
-            code,
+            code: code.to_string(),
             message: message.to_string(),
         }
     }
@@ -174,8 +175,13 @@ impl PipeServer {
         })
     }
 
-    /// Accepts clients forever, one task per connection.
-    pub async fn serve<H: Handler>(self, handler: Arc<H>) -> io::Result<()> {
+    /// Accepts clients forever, one task per connection. Every client receives
+    /// the values sent on `events` as event lines.
+    pub async fn serve<H: Handler>(
+        self,
+        handler: Arc<H>,
+        events: broadcast::Sender<Value>,
+    ) -> io::Result<()> {
         let PipeServer { name, sd, first } = self;
         let active = Arc::new(AtomicUsize::new(0));
         let mut next = first;
@@ -191,9 +197,10 @@ impl PipeServer {
             }
             let guard = ActiveGuard(Arc::clone(&active));
             let h = Arc::clone(&handler);
+            let ev = events.subscribe();
             tokio::spawn(async move {
                 let _guard = guard;
-                let _ = serve_connection(pipe, h).await;
+                let _ = serve_connection(pipe, h, ev).await;
             });
         }
     }
@@ -240,32 +247,49 @@ async fn read_line<R: tokio::io::AsyncBufRead + Unpin>(
     Ok(Some(()))
 }
 
-async fn serve_connection<H: Handler>(pipe: NamedPipeServer, h: Arc<H>) -> io::Result<()> {
-    let mut io = BufReader::with_capacity(4096, pipe);
+async fn serve_connection<H: Handler>(
+    pipe: NamedPipeServer,
+    h: Arc<H>,
+    mut events: broadcast::Receiver<Value>,
+) -> io::Result<()> {
+    let (rd, mut wr) = tokio::io::split(pipe);
+    let mut io = BufReader::with_capacity(4096, rd);
     let mut line = Vec::new();
-    while read_line(&mut io, &mut line).await?.is_some() {
-        if line.is_empty() {
-            continue;
-        }
-        if let Some(resp) = dispatch(&*h, &line).await {
-            let mut out = serde_json::to_vec(&resp).map_err(io::Error::other)?;
-            if out.len() > MAX_MESSAGE {
-                let id = resp.get("id").cloned().unwrap_or(Value::Null);
-                out = serde_json::to_vec(&error_response(
-                    id,
-                    &RpcError::new(code::INTERNAL_ERROR, "response too large"),
-                ))
-                .map_err(io::Error::other)?;
+    loop {
+        let mut out = tokio::select! {
+            r = read_line(&mut io, &mut line) => {
+                if r?.is_none() {
+                    return Ok(());
+                }
+                if line.is_empty() {
+                    continue;
+                }
+                let Some(resp) = dispatch(&*h, &line).await else { continue };
+                let out = serde_json::to_vec(&resp).map_err(io::Error::other)?;
+                if out.len() > MAX_MESSAGE {
+                    let id = resp.get("id").cloned().unwrap_or(Value::Null);
+                    serde_json::to_vec(&error_response(
+                        id,
+                        &RpcError::new(code::INTERNAL_ERROR, "response too large"),
+                    ))
+                    .map_err(io::Error::other)?
+                } else {
+                    out
+                }
             }
-            out.push(b'\n');
-            io.get_mut().write_all(&out).await?;
-        }
+            ev = events.recv() => match ev {
+                Ok(v) => serde_json::to_vec(&v).map_err(io::Error::other)?,
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => return Ok(()),
+            },
+        };
+        out.push(b'\n');
+        wr.write_all(&out).await?;
     }
-    Ok(())
 }
 
 fn error_response(id: Value, e: &RpcError) -> Value {
-    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": e.code, "message": e.message } })
+    json!({ "id": id, "error": { "code": e.code, "message": e.message } })
 }
 
 /// Parses one request line and runs it. `None` for notifications.
@@ -282,7 +306,8 @@ pub async fn dispatch<H: Handler>(h: &H, line: &[u8]) -> Option<Value> {
         None | Some(Value::Null | Value::Number(_) | Value::String(_))
     );
     let method = req.get("method").and_then(Value::as_str);
-    let version_ok = req.get("jsonrpc").and_then(Value::as_str) == Some("2.0");
+    // `jsonrpc` is optional (docs/ipc.md); JSON-RPC clients may still send "2.0".
+    let version_ok = req.get("jsonrpc").is_none_or(|v| v.as_str() == Some("2.0"));
     let (Some(method), true, true) = (method, valid_id, version_ok) else {
         let id = if valid_id {
             id.unwrap_or(Value::Null)
@@ -298,7 +323,7 @@ pub async fn dispatch<H: Handler>(h: &H, line: &[u8]) -> Option<Value> {
     let result = h.call(method, params).await;
     let id = id?; // notification: no response
     Some(match result {
-        Ok(v) => json!({ "jsonrpc": "2.0", "id": id, "result": v }),
+        Ok(v) => json!({ "id": id, "result": v }),
         Err(e) => error_response(id, &e),
     })
 }
@@ -359,7 +384,7 @@ fn owner_sid(handle: std::os::windows::io::RawHandle) -> io::Result<String> {
     unsafe { sid_to_string(owner) }
 }
 
-/// A JSON-RPC client for the agent pipe (used by tests, tools and later the UI).
+/// A client for the agent pipe (used by tests, tools and later the UI).
 #[derive(Debug)]
 pub struct PipeClient {
     io: BufReader<NamedPipeClient>,
@@ -396,7 +421,7 @@ impl PipeClient {
     pub async fn call(&mut self, method: &str, params: Value) -> Result<Value, ClientError> {
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1);
-        let req = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+        let req = json!({ "id": id, "method": method, "params": params });
         let mut out = serde_json::to_vec(&req).map_err(io::Error::other)?;
         if out.len() > MAX_MESSAGE {
             return Err(ClientError::Protocol("request too large"));
@@ -404,18 +429,23 @@ impl PipeClient {
         out.push(b'\n');
         self.io.get_mut().write_all(&out).await?;
         let mut line = Vec::new();
-        if read_line(&mut self.io, &mut line).await?.is_none() {
-            return Err(ClientError::Protocol("connection closed"));
-        }
-        let resp: Value =
-            serde_json::from_slice(&line).map_err(|_| ClientError::Protocol("invalid json"))?;
+        let resp = loop {
+            if read_line(&mut self.io, &mut line).await?.is_none() {
+                return Err(ClientError::Protocol("connection closed"));
+            }
+            let v: Value =
+                serde_json::from_slice(&line).map_err(|_| ClientError::Protocol("invalid json"))?;
+            if v.get("event").is_none() {
+                break v; // this simple client skips events
+            }
+        };
         if resp.get("id").and_then(Value::as_u64) != Some(id) {
             return Err(ClientError::Protocol("unexpected id"));
         }
         if let Some(err) = resp.get("error") {
             let code = err
                 .get("code")
-                .and_then(Value::as_i64)
+                .and_then(Value::as_str)
                 .unwrap_or(code::INTERNAL_ERROR);
             let message = err.get("message").and_then(Value::as_str).unwrap_or("");
             return Err(ClientError::Rpc(RpcError::new(code, message)));
@@ -475,7 +505,8 @@ mod tests {
         rt().block_on(async {
             let name = test_name("rt");
             let server = PipeServer::bind(&name).unwrap();
-            tokio::spawn(server.serve(Arc::new(Echo)));
+            let (ev, _) = broadcast::channel(4);
+            tokio::spawn(server.serve(Arc::new(Echo), ev.clone()));
             let mut c = PipeClient::connect(&name).await.unwrap();
             let v = json!({"a": [1, 2, 3], "s": "ğüş"});
             assert_eq!(c.call("echo", v.clone()).await.unwrap(), v);
@@ -487,6 +518,14 @@ mod tests {
             // A second concurrent client works too.
             let mut c2 = PipeClient::connect(&name).await.unwrap();
             assert_eq!(c2.call("ping", Value::Null).await.unwrap(), json!("pong"));
+            // Events reach connected clients as event lines.
+            ev.send(json!({"event": "status", "data": {}})).unwrap();
+            let r = c2
+                .send_raw(b"{\"id\":9,\"method\":\"ping\"}\n")
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(r["event"], "status");
         });
     }
 
@@ -494,7 +533,11 @@ mod tests {
     fn malformed_and_oversize_requests() {
         rt().block_on(async {
             let name = test_name("bad");
-            tokio::spawn(PipeServer::bind(&name).unwrap().serve(Arc::new(Echo)));
+            tokio::spawn(
+                PipeServer::bind(&name)
+                    .unwrap()
+                    .serve(Arc::new(Echo), broadcast::channel(4).0),
+            );
             let mut c = PipeClient::connect(&name).await.unwrap();
             let r = c.send_raw(b"{not json\n").await.unwrap().unwrap();
             assert_eq!(r["error"]["code"], code::PARSE_ERROR);
@@ -506,21 +549,21 @@ mod tests {
             assert_eq!(r["error"]["code"], code::INVALID_REQUEST);
             assert_eq!(r["id"], 1);
             let r = c
-                .send_raw(b"{\"jsonrpc\":\"2.0\",\"id\":[1],\"method\":\"ping\"}\n")
+                .send_raw(b"{\"id\":[1],\"method\":\"ping\"}\n")
                 .await
                 .unwrap()
                 .unwrap();
             assert_eq!(r["error"]["code"], code::INVALID_REQUEST);
             assert_eq!(r["id"], Value::Null);
             let r = c
-                .send_raw(b"{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":5}\n")
+                .send_raw(b"{\"id\":2,\"method\":5}\n")
                 .await
                 .unwrap()
                 .unwrap();
             assert_eq!(r["error"]["code"], code::INVALID_REQUEST);
             // Notification: no response; the next call still works.
             c.io.get_mut()
-                .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"ping\"}\n")
+                .write_all(b"{\"method\":\"ping\"}\n")
                 .await
                 .unwrap();
             assert_eq!(c.call("ping", Value::Null).await.unwrap(), json!("pong"));

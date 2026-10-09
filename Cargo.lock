@@ -3860,12 +3860,15 @@ dependencies = [
 name = "warpshot-agent"
 version = "0.1.0"
 dependencies = [
+ "iroh",
  "png",
  "serde_json",
  "tokio",
+ "warpshot-core",
  "windows",
  "windows-registry",
  "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]

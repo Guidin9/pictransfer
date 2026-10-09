@@ -129,7 +129,20 @@ Results:
 
 | Date | C1 | C2 | C3 | C4 | Notes |
 |---|---|---|---|---|---|
-| – | – | – | – | – | – |
+| 2026-10-09 | 600 s: 0 missed pongs at every interval | not measured | not measured | not measured | 6 h, 6 connections; see below |
+
+Every connection, at every interval (30–600 s), was closed by the edge with
+code 1006 every 25–135 min (5–7 closes per connection in 6 h, longest
+uninterrupted 1.5–2.2 h), independent of the ping interval. No pong was ever
+missed and reconnects never failed. So the keepalive does not keep the socket
+alive; it only detects silent deaths, and the closes are not silent.
+
+**Decision: K = 120 s** (protocol §6.3). Network per day ≈ 125 KB of
+keepalives (Spike B estimate halved) + ≈ 30 reconnects × ≈ 6 KB TLS handshake
+≈ 0.3 MB/day, inside the 0.5 MB/day budget; K = 60 would sit at ≈ 0.45 MB.
+Worst-case detection of a silently dead socket is 2 × K = 4 min, and the
+client also reconnects on network-change and resume events. C2–C4 are checked
+on the deployed server (E2).
 
 ## Spike D — Android wake path (user's phone)
 

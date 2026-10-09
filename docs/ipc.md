@@ -11,7 +11,10 @@ The agent owns all state, keys and network access; the UI holds none of them.
 - Response: `{"id": <same>, "result": <value>}` or
   `{"id": <same>, "error": {"code": "<code>", "message": "<short, no content>"}}`.
 - Event (agent → UI, unsolicited): `{"event": "<name>", "data": {...}}`.
-- Unknown methods → error `unknown-method`; bad params → `bad-params`.
+- Unknown methods → error `unknown-method`; bad params → `bad-params`; malformed
+  JSON → `parse-error`; a malformed request → `bad-request`; other failures carry
+  short codes (`not-paired`, `no-server`, `network`, `storage`, …).
+- A `jsonrpc: "2.0"` member is accepted and ignored; responses don't carry it.
   Unknown fields are ignored (forward compatibility).
 - Device ids are lowercase hex of the 32-byte `EndpointId`; times are Unix ms.
 
@@ -54,6 +57,7 @@ on_receive: {save, clipboard, notify, history}, history_days, history_items}`
 | `transfer.done` | `{transfer, ok, code?}` |
 | `group.alert` | `{kind: "device-added", id, name, platform, by_name}` (§4.6; the UI offers "This wasn't me") |
 | `group.fork` | `{}` — security alert: transfers are stopped until re-pairing (§4.5) |
+| `history.changed` | `{}` — reload the history list |
 
 ## Lifetime
 
