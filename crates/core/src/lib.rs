@@ -3,9 +3,12 @@
 
 pub mod b64u;
 pub mod cbor;
+pub mod client;
 pub mod keys;
 pub mod log;
+pub mod net;
 pub mod pair;
+pub mod sanitize;
 pub mod server_auth;
 #[cfg(test)]
 mod vectors;

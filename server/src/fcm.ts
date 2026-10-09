@@ -154,13 +154,10 @@ export async function sendFcm(
   }
   if (res.status === 401 || status === "UNAUTHENTICATED") return { result: "auth", status: res.status };
   // "If FCM reports the token as UNREGISTERED or invalid, the server deletes it" (§6.5).
-  if (
-    res.status === 404 ||
-    errorCode === "UNREGISTERED" ||
-    errorCode === "INVALID_ARGUMENT" ||
-    errorCode === "SENDER_ID_MISMATCH" ||
-    status === "INVALID_ARGUMENT"
-  ) {
+  // Only token-specific detail codes delete a token. A bare 404 or a generic
+  // INVALID_ARGUMENT can come from a wrong project id or a bad message, and
+  // must not wipe every device's token on the first wake.
+  if (errorCode === "UNREGISTERED" || errorCode === "SENDER_ID_MISMATCH") {
     return { result: "token-invalid", status: res.status };
   }
   return { result: "error", status: res.status };

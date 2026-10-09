@@ -211,7 +211,8 @@ export function decodeCbor(bytes: Uint8Array, limits: CborLimits): Cbor {
     maxBytes: limits.maxBytes,
     maxDepth: Math.min(limits.maxDepth ?? MAX_DEPTH, MAX_DEPTH),
     maxString: limits.maxString ?? limits.maxBytes,
-    maxItems: limits.maxItems ?? limits.maxBytes,
+    // Same default as the Rust core (Limits::new): at most 1024 entries per array/map.
+    maxItems: limits.maxItems ?? 1024,
   };
   if (bytes.length > lim.maxBytes) throw new CborError("too-large");
   const r = new Reader(bytes, new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), lim);

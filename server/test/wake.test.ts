@@ -178,8 +178,8 @@ describe("token invalidation", () => {
       {
         error: {
           code: 400,
-          status: "INVALID_ARGUMENT",
-          details: [{ "@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError", errorCode: "INVALID_ARGUMENT" }],
+          status: "UNREGISTERED",
+          details: [{ "@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError", errorCode: "UNREGISTERED" }],
         },
       },
       { status: 400 },
@@ -187,7 +187,7 @@ describe("token invalidation", () => {
 
   it.each([
     ["UNREGISTERED", unregistered],
-    ["INVALID_ARGUMENT", invalid],
+    ["UNREGISTERED", invalid],
   ])("%s → token deleted, via none, later wakes skip FCM", async (_n, resp) => {
     const { A, B, tg } = await setup();
     await call(B, "PUT", tg.path("push-token"), { provider: "fcm", token: "tokB" });

@@ -199,6 +199,8 @@ export class GroupDO extends DurableObject<Env> {
     const a = await verifyRequestSignature(req, body, now);
     const st = this.loadState();
     if (st === null) throw new ApiError("no-group");
+    // Membership before the replay cache, so non-members cause no storage writes.
+    if (!st.members.has(a.idB64)) throw new ApiError("not-member");
     await this.checkReplay(a, now);
     // Re-read: the state may have changed during the awaits above.
     const cur = this.loadState();
