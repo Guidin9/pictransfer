@@ -20,6 +20,7 @@ pub mod clipboard;
 pub mod dpapi;
 pub mod hotkey;
 pub mod image;
+pub mod osd;
 pub mod pipe;
 pub mod power;
 pub mod selftest;

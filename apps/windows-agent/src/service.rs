@@ -40,6 +40,7 @@ use crate::{
     clipboard::ClipContent,
     dpapi::Dpapi,
     hotkey::{self, Hotkey},
+    osd,
     pipe::{self, RpcError},
     power,
     tray::{DeviceItem, MenuModel},
@@ -60,6 +61,18 @@ pub enum UiMsg {
     Menu(MenuModel),
     /// Register this hotkey (canonical string) instead of the current one.
     Hotkey(String),
+    /// Show or update the on-screen flyout (hotkey sends).
+    Flyout {
+        text: String,
+        tone: osd::Tone,
+    },
+}
+
+/// Where a send was started; hotkey sends report through the flyout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    Hotkey,
+    Ui,
 }
 
 /// Requests from the UI thread.
@@ -350,12 +363,15 @@ impl Service {
             Cmd::SendClip(c) => match clip_items(c) {
                 Ok(items) => {
                     let this = Arc::clone(self);
-                    tokio::spawn(async move { this.send_and_report(None, items).await });
+                    tokio::spawn(
+                        async move { this.send_and_report(None, items, Origin::Hotkey).await },
+                    );
                 }
-                Err(code) => self.toast(
-                    "Nothing sent",
-                    &format!("The clipboard can't be sent ({code})."),
-                ),
+                Err(code) => {
+                    let body = format!("The clipboard can't be sent ({code}).");
+                    self.flyout(&format!("Not sent: {code}"), osd::Tone::Error);
+                    self.toast("Nothing sent", &body);
+                }
             },
             Cmd::SetDefaultIndex(i) => {
                 let others = self.others().await;
@@ -393,6 +409,13 @@ impl Service {
             (false, false) => &self.route_relay_only,
         };
         c.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn flyout(&self, text: &str, tone: osd::Tone) {
+        (self.ui)(UiMsg::Flyout {
+            text: text.into(),
+            tone,
+        });
     }
 
     fn toast(&self, title: &str, body: &str) {
@@ -901,6 +924,7 @@ impl Service {
         self: &Arc<Self>,
         target: Option<String>,
         items: Vec<OutItem>,
+        origin: Origin,
     ) -> bool {
         let n = self.next_transfer.fetch_add(1, Ordering::Relaxed);
         let res = self.send(target.as_deref(), items).await;
@@ -922,7 +946,12 @@ impl Service {
                     .find(|(id, _)| *id == to)
                     .map(|(_, (n, _))| n)
                     .unwrap_or_else(|| "your device".into());
-                self.toast("Sent", &format!("Sent to {name}."));
+                // Hotkey sends: the flyout says it (toast banners are hidden in
+                // full-screen apps); other sends keep the toast.
+                match origin {
+                    Origin::Hotkey => self.flyout(&format!("Sent to {name}"), osd::Tone::Ok),
+                    Origin::Ui => self.toast("Sent", &format!("Sent to {name}.")),
+                }
             }
             Err(c) => {
                 let body = match c.as_str() {
@@ -933,6 +962,16 @@ impl Service {
                     "not-paired" => "Pair a device first (tray icon → Settings).".to_owned(),
                     other => format!("Sending failed ({other})."),
                 };
+                if origin == Origin::Hotkey {
+                    let short = match c.as_str() {
+                        "offline" => "device offline".to_owned(),
+                        "no-answer" => "no answer".to_owned(),
+                        "not-paired" => "not paired".to_owned(),
+                        other => other.to_owned(),
+                    };
+                    self.flyout(&format!("Not sent: {short}"), osd::Tone::Error);
+                }
+                // Failures also go to the notification center as a record.
                 self.toast("Not sent", &body);
             }
         }
@@ -1384,7 +1423,7 @@ impl Service {
                 let target = s("target").map(str::to_owned);
                 let n = self.next_transfer.load(Ordering::Relaxed);
                 let this = Arc::clone(self);
-                tokio::spawn(async move { this.send_and_report(target, items).await });
+                tokio::spawn(async move { this.send_and_report(target, items, Origin::Ui).await });
                 Ok(json!({"transfer": n.to_string()}))
             }
             "debug.counters" => {

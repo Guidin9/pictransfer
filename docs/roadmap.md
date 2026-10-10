@@ -122,10 +122,13 @@ path, NAT, port mapping, endpoint, membership log).
 ## Next session (from the user's testing, 2026-10-10)
 
 1. **Mobile UI redesign** (Compose): onboarding, paired screen, share sheet card.
-2. **Hotkey feedback on the PC:** Ctrl+Alt+Z gives no visible feedback; the
-   phone notifies ~2.5–3 s later. Show an immediate "Sending to …" state
-   (toast and/or tray icon) and the result; check why the "Sent" toast
-   (`service.rs` `send_and_report`) doesn't appear.
+2. ✓ **Hotkey feedback on the PC:** an on-screen flyout above the taskbar
+   (`osd.rs`) says "Sending to …" the moment the hotkey is pressed, then
+   "Sent to …" or "Not sent: …"; it never takes focus, lets clicks through
+   and is destroyed when it hides. Toast banners were the wrong channel:
+   Windows hides them during full-screen apps, games and streams (the "Sent"
+   toasts were in the notification center). Failures still also toast. The
+   agent is now per-monitor DPI aware. Dev check: `--render-flyout DIR`.
 3. **Progress bar for sends** (phone share sheet first, PC too): bytes sent /
    total and speed, so a 250 MB video shows it's moving. Needs per-chunk
    progress from `net::xfer` → FFI callback → Kotlin; agent emits

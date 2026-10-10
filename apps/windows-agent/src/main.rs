@@ -8,6 +8,7 @@
 //! warpshot-agent --install-shortcut  create the Start Menu shortcut with the AUMID
 //! warpshot-agent --remove-shortcut   remove it
 //! warpshot-agent --test-toast        show a sample toast (manual check; needs the shortcut)
+//! warpshot-agent --render-flyout DIR write the flyout states as PNGs (off-screen)
 //! ```
 //!
 //! Threads at idle: this UI thread (message loop) and one tokio `current_thread`
@@ -23,7 +24,7 @@ use tokio::sync::{broadcast, mpsc};
 use warpshot_agent::{
     clipboard,
     hotkey::{self, Hotkey},
-    image, pipe, power, selftest,
+    image, osd, pipe, power, selftest,
     service::{self, Cmd, Service, UiMsg},
     single_instance, toast,
     tray::{self, MenuCommand, MenuModel, Tray},
@@ -71,16 +72,36 @@ fn show_toast(title: &str, body: &str, image: Option<&Path>) {
     });
 }
 
-/// Hotkey pressed: read the clipboard and hand it to the transfer layer.
+/// Hotkey pressed: read the clipboard and hand it to the transfer layer. The
+/// flyout answers at once; the service updates it with the result.
 fn on_hotkey(hwnd: HWND) {
     match clipboard::read(hwnd) {
         Ok(Some(content)) => {
+            let target = with_app(|a| send_target_name(&a.menu)).flatten();
+            let text = match target {
+                Some(name) => format!("Sending to {name}…"),
+                None => "Sending…".to_owned(),
+            };
+            osd::show(&text, osd::Tone::Busy);
             with_app(|a| a.cmd.send(Cmd::SendClip(content)));
         }
-        Ok(None) => show_toast("Nothing to send", "The clipboard is empty.", None),
-        Err(_) => show_toast("Nothing sent", "The clipboard could not be read.", None),
+        Ok(None) => osd::show("Nothing to send: the clipboard is empty", osd::Tone::Error),
+        Err(_) => osd::show(
+            "Nothing sent: the clipboard could not be read",
+            osd::Tone::Error,
+        ),
     }
     power::trim_working_set();
+}
+
+/// The device a hotkey send goes to, as the service picks it: the default
+/// target, else the only other device.
+fn send_target_name(m: &MenuModel) -> Option<String> {
+    match m.default_target {
+        Some(i) => m.targets.get(i).cloned(),
+        None if m.targets.len() == 1 => m.targets.first().cloned(),
+        None => None,
+    }
 }
 
 /// Opens `warpshot-ui.exe` (next to the agent) if it is installed.
@@ -133,6 +154,7 @@ fn on_ui_msg(hwnd: HWND, msg: UiMsg) {
         UiMsg::ClipFiles(paths) => {
             let _ = clipboard::write_files(hwnd, &paths);
         }
+        UiMsg::Flyout { text, tone } => osd::show(&text, tone),
         UiMsg::Menu(m) => {
             with_app(|a| a.menu = m);
         }
@@ -303,6 +325,14 @@ fn run_agent() -> ExitCode {
         Ok(single_instance::Instance::AlreadyRunning) => return ExitCode::SUCCESS,
         Err(_) => return ExitCode::FAILURE,
     };
+    // Per-monitor DPI awareness: crisp tray icon, menu and flyout on scaled
+    // displays (the flyout sizes itself with GetDpiForWindow).
+    // SAFETY: process-wide setting made before any window exists.
+    unsafe {
+        windows_sys::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(
+            windows_sys::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+        )
+    };
     let Some(hwnd) = create_window() else {
         return ExitCode::FAILURE;
     };
@@ -398,6 +428,35 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Some("--render-flyout") => {
+            // Dev check without touching the screen: the flyout states as PNGs.
+            let dir = args
+                .get(1)
+                .map_or_else(|| std::path::PathBuf::from("."), Into::into);
+            let states = [
+                (
+                    "busy",
+                    "Sending to Mert adlı kişiye ait S21 FE…",
+                    osd::Tone::Busy,
+                ),
+                ("ok", "Sent to Mert adlı kişiye ait S21 FE", osd::Tone::Ok),
+                ("error", "Not sent: device offline", osd::Tone::Error),
+            ];
+            let mut n = 0u32;
+            for (name, text, tone) in states {
+                for (theme, dark) in [("light", false), ("dark", true)] {
+                    for dpi in [96, 144] {
+                        let file = dir.join(format!("flyout-{name}-{theme}-{dpi}.png"));
+                        if let Some(png) = osd::render_png(text, tone, dark, dpi)
+                            && std::fs::write(&file, png).is_ok()
+                        {
+                            n = n.saturating_add(1);
+                        }
+                    }
+                }
+            }
+            output(&args, &format!("{n} flyout images written"))
+        }
         Some("--test-toast") => {
             let img = args.get(1).map(std::path::PathBuf::from);
             let r = toast::show(&toast::Toast {
