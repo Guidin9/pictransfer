@@ -11,6 +11,7 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import uniffi.warpshot_ffi.DeviceEntry
 import uniffi.warpshot_ffi.PlatformKeystore
 import uniffi.warpshot_ffi.TransferObserver
 import uniffi.warpshot_ffi.WarpException
@@ -140,7 +141,15 @@ object Core {
         return instance ?: open(ctx, url)
     }
 
-    var defaultTarget: String? = null
+    /** The PC sends go to: the user's last choice if still paired, else the first PC. */
+    fun target(ctx: Context, pcs: List<DeviceEntry>): DeviceEntry? {
+        val saved = prefs(ctx).getString("target", null)
+        return pcs.firstOrNull { it.id == saved } ?: pcs.firstOrNull()
+    }
+
+    fun setTarget(ctx: Context, id: String) {
+        prefs(ctx).edit().putString("target", id).apply()
+    }
 }
 
 /** A short, translated reason for a failed core call (codes only, no content). */

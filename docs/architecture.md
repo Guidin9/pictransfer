@@ -64,12 +64,13 @@ warpshot-agent.exe  (single instance: named mutex Local\warpshot-agent-<user SID
 
 | Piece | Role |
 |---|---|
-| `ShareActivity` (transparent, `excludeFromRecents`) | Receives `ACTION_SEND` / `ACTION_SEND_MULTIPLE` (`*/*`). A Direct Share target sends immediately; otherwise it shows a minimal device picker |
+| `MainActivity` | Not paired: onboarding (three steps that use the PC UI's own labels, "Pair with PC" opens the Google code scanner, so no camera permission; the SAS dialog). Paired: the target PC card, Photos (system photo picker, no media permission) and Files (document picker), a text field with Paste, running transfers with Cancel, a notification-permission card while notifications are off, tips. Results of its own sends show as a snackbar instead of a notification |
+| `ShareActivity` (transparent, `excludeFromRecents`) | Receives `ACTION_SEND` / `ACTION_SEND_MULTIPLE` (`*/*`) and shows a bottom sheet: preview (thumbnail, name and size, or the text), progress, Cancel / "Continue in background". With one paired PC it sends at once; with several the user picks one (the last choice is preselected and remembered) |
 | Sharing shortcuts | One dynamic shortcut per paired PC → appears directly in the system share sheet |
-| `PtMessagingService` (FCM) | Receives `{v, e}`; starts `TransferService` within the high-priority exemption |
+| `PushService` (FCM) | Receives `{v, e}`; starts `TransferService` within the high-priority exemption |
 | `TransferService` (foreground, `dataSync`) | Runs every transfer. Receive: opens the envelope via core, dials the sender, receives, runs outputs. Send: takes the items `ShareActivity` copied into app storage and sends them, so a long send survives leaving the share card. Its ongoing notification shows progress with Cancel ("Cancel all" for several); it stops itself when idle |
 | Outputs | MediaStore (`Pictures/Warpshot` for images, `Download/Warpshot` for other files); clipboard (`ClipData` + FileProvider URI or text); `BigPictureStyle` notification (Share / Open / Copy); history |
-| Onboarding | Camera QR scan (CameraX + ZXing), notification permission, guidance to exempt the app from battery optimization (settings intent; no direct-request permission) |
+| Onboarding | See `MainActivity`. The notification permission is asked right after pairing; denied twice, the card opens the app's notification settings. Planned: guidance to exempt the app from battery optimization (settings intent; no direct-request permission) |
 | Keystore bridge | UniFFI callback interface: wrap/unwrap with an Android Keystore AES-GCM key (StrongBox if available) |
 
 When the UI is in the foreground, the app opens the server WebSocket for live

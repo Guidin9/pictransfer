@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: renders each screen with sample data for screenshots
+     (adb shell am start -n io.github.guidin9.warpshot/.DemoActivity with the string extra "screen"). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name=".DemoActivity"
+            android:exported="true" />
+    </application>
+</manifest>

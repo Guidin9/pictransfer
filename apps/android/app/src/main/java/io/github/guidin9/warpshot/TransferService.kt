@@ -20,18 +20,25 @@ import android.net.Uri
 import android.os.Environment
 import android.os.IBinder
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.text.format.Formatter
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -221,7 +228,73 @@ object Sender {
 
 /** Copies of shared items in app storage (`cache/outgoing/<n>/<name>`), kept only while sending. */
 object Outgoing {
-    fun dir(ctx: Context): File = File(ctx.cacheDir, "outgoing")
+    private val swept = AtomicBoolean(false)
+
+    fun dir(ctx: Context): File {
+        val d = File(ctx.cacheDir, "outgoing")
+        // Copies left by a process that died mid-send (killed, force-stopped) are
+        // never sent: the first use in a new process, before any copy of its own, removes them.
+        if (swept.compareAndSet(false, true)) d.listFiles()?.forEach { it.deleteRecursively() }
+        return d
+    }
+
+    /** A shared item's display name (sanitized) and size, as far as its provider tells. */
+    fun describe(ctx: Context, uri: Uri): Pair<String, Long?> {
+        var name: String? = null
+        var size: Long? = null
+        runCatching {
+            ctx.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)
+                ?.use { c ->
+                    if (c.moveToFirst()) {
+                        name = c.getString(0)
+                        if (!c.isNull(1)) size = c.getLong(1)
+                    }
+                }
+        }
+        var n = name ?: uri.lastPathSegment ?: "file"
+        // The photo picker hides file names ("1000012345.jpg"): name it by when it was taken.
+        Regex("""\d+(\.\w{1,8})?""").matchEntire(n)?.let { m ->
+            val taken = runCatching {
+                ctx.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DATE_TAKEN), null, null, null)?.use { c ->
+                    if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else null
+                }
+            }.getOrNull() ?: System.currentTimeMillis()
+            n = "IMG_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(taken)) + m.groupValues[1]
+        }
+        return sanitize(n) to size
+    }
+
+    private fun sanitize(raw: String): String =
+        raw.substringAfterLast('/').replace(Regex("[\\\\:*?\"<>|\\u0000-\\u001f]"), "_").take(120).ifBlank { "file" }
+
+    /** Copies a shared item into `cache/outgoing/<n>/<name>`; null if it can't be read. Cancellable. */
+    suspend fun copy(ctx: Context, uri: Uri): File? {
+        val out = runCatching {
+            File(dir(ctx), "${System.nanoTime()}").apply { mkdirs() }.let { File(it, describe(ctx, uri).first) }
+        }.getOrNull() ?: return null
+        val ok = runCatching {
+            ctx.contentResolver.openInputStream(uri)?.use { input ->
+                out.outputStream().use { o ->
+                    val buf = ByteArray(256 * 1024)
+                    while (true) {
+                        currentCoroutineContext().ensureActive() // cancelled while preparing
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        o.write(buf, 0, n)
+                    }
+                }
+            } != null
+        }.getOrDefault(false)
+        if (!ok) {
+            delete(ctx, listOf(out.path))
+            return null
+        }
+        return out
+    }
+
+    /** "name" or "name +2": the label a send of [files] shows. */
+    fun label(files: List<File>): String =
+        files.firstOrNull()?.name.orEmpty() + if (files.size > 1) " +${files.size - 1}" else ""
 
     fun delete(ctx: Context, paths: List<String>) {
         val root = dir(ctx).canonicalFile

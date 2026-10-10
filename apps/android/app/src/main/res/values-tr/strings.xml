@@ -2,24 +2,53 @@
 <resources>
     <string name="share_label">PC\'ye gönder</string>
 
-    <!-- Ana ekran ve eşleştirme -->
+    <!-- Karşılama ve eşleştirme. PC tarafındaki adlar ("Eşleştirme", "Eşleştirme
+         kodunu göster", "Bilgisayarla eşleştir") apps/windows-ui/src/i18n.ts ile aynı olmalı. -->
+    <string name="onb_tagline">Ekran görüntüleri, metinler ve dosyalar telefonunuzla PC\'niz arasında anında.</string>
+    <string name="onb_steps_title">PC\'nizle eşleştirin</string>
+    <string name="onb_step1">PC\'nizde görev çubuğundaki Warpshot simgesine tıklayın, Eşleştirme\'yi açın ve “Eşleştirme kodunu göster”e basın.</string>
+    <string name="onb_step2">Aşağıdaki “Bilgisayarla eşleştir”e dokunup kodu tarayın.</string>
+    <string name="onb_step3">İki ekranda da aynı kodun göründüğünü kontrol edip onaylayın.</string>
+    <string name="onb_privacy">Hesap gerekmez. Her şey uçtan uca şifrelenir: gönderdiklerinizi yalnızca kendi cihazlarınız okuyabilir.</string>
+    <string name="pair_with_pc">Bilgisayarla eşleştir</string>
+    <string name="try_again">Tekrar dene</string>
     <string name="pair_not_code">Bu bir Warpshot eşleştirme kodu değil.</string>
     <string name="pairing">Eşleştiriliyor…</string>
-    <string name="paired">Eşleştirildi.</string>
+    <string name="pairing_wait">Warpshot iki cihazda da açık kalsın.</string>
+    <string name="paired_with">%1$s ile eşleştirildi.</string>
     <string name="pairing_failed">Eşleştirme başarısız. %1$s</string>
+    <string name="pair_err_invalid">Bu kod geçersiz ya da süresi dolmuş. PC\'nizde yeni bir kod gösterip tekrar tarayın.</string>
+    <string name="pair_err_rejected">Eşleştirme iptal edildi ya da kodun süresi doldu. PC\'nizde yeni bir kod gösterip tekrar deneyin.</string>
+    <string name="pair_err_network">PC\'nize ulaşılamadı. İki cihazın da çevrimiçi olduğundan emin olup yeni bir kodla tekrar deneyin.</string>
     <string name="scanner_unavailable">Tarayıcı kullanılamıyor: %1$s</string>
-    <string name="pair_intro">PC\'nizde Warpshot ayarlarını açın (tepsi simgesi → Ayarlar → Eşleştirme), sonra QR kodu tarayın.</string>
-    <string name="scan_code">Eşleştirme kodunu tara</string>
-    <string name="paired_devices">Eşleşmiş cihazlar</string>
-    <string name="share_hint">Ekran görüntüsü veya dosya göndermek için: açın, Paylaş\'a dokunun ve Warpshot\'ı seçin.</string>
-    <string name="text_to_send">Gönderilecek metin</string>
-    <string name="sending">Gönderiliyor…</string>
-    <string name="sent_to">%1$s cihazına gönderildi.</string>
-    <string name="send_to">%1$s cihazına gönder</string>
+    <string name="confirm_pairing">Kodlar aynı mı?</string>
+    <string name="confirm_pairing_body">%1$s ekranında tam olarak bu kodun göründüğünü kontrol edin. Yalnızca aynıysa onaylayın.</string>
+    <string name="codes_match">Aynı — eşleştir</string>
+    <string name="codes_differ">Aynı değil</string>
+
+    <!-- Ana ekran -->
+    <string name="more">Diğer seçenekler</string>
     <string name="pair_another">Başka bir PC eşleştir</string>
-    <string name="confirm_pairing">Eşleştirmeyi onayla</string>
-    <string name="confirm_pairing_body">\"%1$s\" ile eşleştirilsin mi?\n\nPC\'nizde aynı kodun göründüğünü kontrol edin:\n\n%2$s</string>
-    <string name="codes_match">Kodlar aynı</string>
+    <string name="sending_target">Gönderilecek cihaz</string>
+    <string name="e2e">Uçtan uca şifreli</string>
+    <string name="photos">Fotoğraflar</string>
+    <string name="files">Dosyalar</string>
+    <string name="text_hint">Metin yazın veya yapıştırın</string>
+    <string name="paste">Yapıştır</string>
+    <string name="send">Gönder</string>
+    <string name="clipboard_empty">Panoda metin yok.</string>
+    <string name="in_progress">Süren aktarımlar</string>
+    <string name="notif_title">Bildirimleri açın</string>
+    <string name="notif_body">PC\'nizin gönderdiklerini ve gönderimlerinizin ulaşıp ulaşmadığını görmek için.</string>
+    <string name="notif_turn_on">Aç</string>
+    <string name="tip_share_title">Her uygulamadan gönderin</string>
+    <string name="tip_share">Paylaş\'a dokunup Warpshot\'ı seçin: ekran görüntüleri, fotoğraflar, dosyalar ve bağlantılar.</string>
+    <string name="tip_pc_title">PC\'nizden</string>
+    <string name="tip_pc">PC\'nizdeki gönderme kısayolu panodakini ya da yeni bir ekran görüntüsünü buraya gönderir. Kısayolu PC\'deki Warpshot ayarlarından değiştirebilirsiniz.</string>
+    <string name="tip_receive_title">Gelenler nereye gider</string>
+    <string name="tip_receive">Metin ve görüntüler panoya kopyalanır. Görüntüler Pictures/Warpshot\'a, diğer dosyalar Download/Warpshot\'a kaydedilir.</string>
+    <string name="sent_to">%1$s cihazına gönderildi.</string>
+    <string name="not_sent_reason">%1$s cihazına gönderilemedi. %2$s</string>
     <string name="cancel">İptal</string>
 
     <!-- Paylaşım kartı -->
@@ -34,6 +63,11 @@
     <string name="cancelled">İptal edildi.</string>
     <string name="start_not_allowed">Android aktarımın başlamasına izin vermedi.</string>
     <string name="start_failed">Gönderim başlatılamadı. Tekrar deneyin.</string>
+    <string name="open_app">Warpshot\'ı aç</string>
+    <plurals name="items">
+        <item quantity="one">%1$d öğe</item>
+        <item quantity="other">%1$d öğe</item>
+    </plurals>
 
     <!-- Aktarımlar ve bildirimler -->
     <string name="your_pc">PC\'niz</string>

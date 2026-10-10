@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app icon's arrow alone, for the in-app logo (drawn on the gradient in Compose). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="72dp" android:height="72dp"
+    android:viewportWidth="72" android:viewportHeight="72">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M14,31.2H39.5V18.5L58,36L39.5,53.5V40.8H14Z" />
+</vector>

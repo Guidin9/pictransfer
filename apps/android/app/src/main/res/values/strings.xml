@@ -4,24 +4,53 @@
     <string name="app_name" translatable="false">Warpshot</string>
     <string name="share_label">Send to PC</string>
 
-    <!-- Main screen and pairing -->
+    <!-- Onboarding and pairing. The PC side's labels ("Pairing", "Show pairing
+         code", "Pair with PC") must match apps/windows-ui/src/i18n.ts. -->
+    <string name="onb_tagline">Screenshots, text and files between your phone and your PC, instantly.</string>
+    <string name="onb_steps_title">Pair with your PC</string>
+    <string name="onb_step1">On your PC, click the Warpshot icon in the taskbar, open Pairing and press “Show pairing code”.</string>
+    <string name="onb_step2">Tap “Pair with PC” below and scan the code.</string>
+    <string name="onb_step3">Check that both screens show the same code, then confirm.</string>
+    <string name="onb_privacy">No account needed. Everything is end-to-end encrypted: only your own devices can read what you send.</string>
+    <string name="pair_with_pc">Pair with PC</string>
+    <string name="try_again">Try again</string>
     <string name="pair_not_code">This is not a Warpshot pairing code.</string>
     <string name="pairing">Pairing…</string>
-    <string name="paired">Paired.</string>
+    <string name="pairing_wait">Keep Warpshot open on both devices.</string>
+    <string name="paired_with">Paired with %1$s.</string>
     <string name="pairing_failed">Pairing failed. %1$s</string>
+    <string name="pair_err_invalid">This code is invalid or has expired. Show a new code on your PC and scan again.</string>
+    <string name="pair_err_rejected">Pairing was cancelled or the code expired. Show a new code on your PC and try again.</string>
+    <string name="pair_err_network">Couldn\'t reach your PC. Make sure both devices are online, then try again with a new code.</string>
     <string name="scanner_unavailable">Scanner unavailable: %1$s</string>
-    <string name="pair_intro">Open Warpshot settings on your PC (tray icon → Settings → Pair), then scan the QR code.</string>
-    <string name="scan_code">Scan pairing code</string>
-    <string name="paired_devices">Paired devices</string>
-    <string name="share_hint">Send a screenshot or file: open it, tap Share and choose Warpshot.</string>
-    <string name="text_to_send">Text to send</string>
-    <string name="sending">Sending…</string>
-    <string name="sent_to">Sent to %1$s.</string>
-    <string name="send_to">Send to %1$s</string>
+    <string name="confirm_pairing">Do the codes match?</string>
+    <string name="confirm_pairing_body">Check that %1$s shows exactly this code. Confirm only if it matches.</string>
+    <string name="codes_match">They match — pair</string>
+    <string name="codes_differ">They don\'t match</string>
+
+    <!-- Home screen -->
+    <string name="more">More options</string>
     <string name="pair_another">Pair another PC</string>
-    <string name="confirm_pairing">Confirm pairing</string>
-    <string name="confirm_pairing_body">Pair with \"%1$s\"?\n\nCheck that your PC shows the same code:\n\n%2$s</string>
-    <string name="codes_match">Codes match</string>
+    <string name="sending_target">Sending to</string>
+    <string name="e2e">End-to-end encrypted</string>
+    <string name="photos">Photos</string>
+    <string name="files">Files</string>
+    <string name="text_hint">Type or paste text</string>
+    <string name="paste">Paste</string>
+    <string name="send">Send</string>
+    <string name="clipboard_empty">There is no text on the clipboard.</string>
+    <string name="in_progress">In progress</string>
+    <string name="notif_title">Turn on notifications</string>
+    <string name="notif_body">See what your PC sends you, and whether your sends arrived.</string>
+    <string name="notif_turn_on">Turn on</string>
+    <string name="tip_share_title">Share from any app</string>
+    <string name="tip_share">Tap Share and choose Warpshot: screenshots, photos, files and links.</string>
+    <string name="tip_pc_title">From your PC</string>
+    <string name="tip_pc">The send hotkey on your PC sends its clipboard or a new screenshot here. Change it in Warpshot\'s settings on the PC.</string>
+    <string name="tip_receive_title">What you receive</string>
+    <string name="tip_receive">Text and images are copied to the clipboard. Images are saved to Pictures/Warpshot, other files to Download/Warpshot.</string>
+    <string name="sent_to">Sent to %1$s.</string>
+    <string name="not_sent_reason">Not sent to %1$s. %2$s</string>
     <string name="cancel">Cancel</string>
 
     <!-- Share card -->
@@ -36,6 +65,11 @@
     <string name="cancelled">Cancelled.</string>
     <string name="start_not_allowed">Android didn\'t allow the transfer to start.</string>
     <string name="start_failed">Couldn\'t start sending. Try again.</string>
+    <string name="open_app">Open Warpshot</string>
+    <plurals name="items">
+        <item quantity="one">%1$d item</item>
+        <item quantity="other">%1$d items</item>
+    </plurals>
 
     <!-- Transfers and notifications -->
     <string name="your_pc">your PC</string>

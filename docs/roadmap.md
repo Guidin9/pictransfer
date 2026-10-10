@@ -121,7 +121,27 @@ path, NAT, port mapping, endpoint, membership log).
 
 ## Next session (from the user's testing, 2026-10-10)
 
-1. **Mobile UI redesign** (Compose): onboarding, paired screen, share sheet card.
+1. ✓ **Mobile UI redesign** (Compose, Material 3 with the wallpaper's colors;
+   a blue fallback before Android 12): onboarding with three steps that use
+   the PC UI's own labels and a large SAS dialog; the paired screen with the
+   target PC, Photos (system photo picker, no media permission), Files,
+   a text field with Paste, running transfers with Cancel, a notifications
+   card and tips; the share sheet as a bottom sheet with a preview (thumbnail
+   or name and size, or the text) and a PC choice when several are paired
+   (remembered). Pairing state lives outside the screen and the activities
+   handle rotation in place, so neither a pairing nor a copy in progress is
+   lost. Adaptive launcher icon and status-bar icon match the PC icon
+   (themed icons supported). Found while testing and fixed: a send could
+   wait forever if the iroh bind never returned, and Cancel didn't work
+   before the PC dialed in (FFI: 20 s bind limit, Cancel during bind and
+   wake; e2e check "phone cancel while waking": 0.4 s, 10.9 s before);
+   copies left by a killed process stayed in the cache (swept on the next
+   start); photo-picker items arrived as "20.png" (now `IMG_<date>`).
+   Checked in the emulator (docs/dev-setup.md §9) in both languages and
+   themes, and live against a test group: pairing with matching SAS,
+   notification permission denied → card → granted, text, photo picker and
+   a 40 MB file to the PC, share sheet.
+   Open: received partial files in `cache/inbox` after a killed process.
 2. ✓ **Hotkey feedback on the PC:** an on-screen flyout above the taskbar
    (`osd.rs`) says "Sending to …" the moment the hotkey is pressed, then
    "Sent to …" or "Not sent: …"; it never takes focus, lets clicks through

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Monochrome status-bar icon: an arrow leaving a frame. -->
+<!-- Monochrome status-bar icon: the app icon's rounded square with the arrow cut out. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp" android:height="24dp"
     android:viewportWidth="24" android:viewportHeight="24">
-    <path android:fillColor="#FFFFFFFF" android:pathData="M4,6h9v2H6v8h7v2H4z" />
-    <path android:fillColor="#FFFFFFFF" android:pathData="M12,8.5l8,3.5l-8,3.5z" />
+    <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+        android:pathData="M7,3H17A4,4 0,0 1,21 7V17A4,4 0,0 1,17 21H7A4,4 0,0 1,3 17V7A4,4 0,0 1,7 3ZM6.5,10.8H12.9V7.6L17.5,12L12.9,16.4V13.2H6.5Z" />
 </vector>

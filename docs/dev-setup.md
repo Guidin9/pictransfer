@@ -119,3 +119,32 @@ in `server\`, run `cargo build -p warpshot-agent` and
 `cargo build -p warpshot-ffi --example phone_sim` (one command with both would
 build only the example), then
 `node scripts\e2e-agent.mjs`.
+
+## 9. Android screens without a phone (emulator)
+
+The SDK's x86_64 Play Store image runs the arm64 app through ARM translation.
+Use an isolated AVD so Android Studio's own stays untouched:
+
+```bash
+export ANDROID_AVD_HOME=<temp dir>; export JAVA_HOME=<Android Studio>/jbr
+avdmanager create avd -n wstest -k "system-images;android-37.0;google_apis_playstore;x86_64" -d pixel_7
+emulator -avd wstest -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
+```
+
+- **Screens with sample data:** debug builds contain `DemoActivity`
+  (`src/debug`, never in release): `adb shell am start -n
+  io.github.guidin9.warpshot/.DemoActivity --es screen home` (names in
+  `DemoActivity.kt`: onboarding, sas, home, home_busy, share_sending,
+  share_choose, share_done, …), then `adb exec-out screencap -p > shot.png`.
+  Language and theme: `adb shell cmd locale set-app-locales
+  io.github.guidin9.warpshot --locales tr-TR`, `adb shell cmd uimode night yes`.
+- **Real pairing and sends** against a test group (never the real one): start
+  `npx wrangler dev --local --port 8787` in `server\`, run
+  `node scripts\test-pc.mjs <work dir>` (a separate debug agent instance that
+  writes `qr.txt` and confirms the SAS itself), `adb reverse tcp:8787
+  tcp:8787`, then `adb shell am start -n
+  io.github.guidin9.warpshot/.DemoActivity --es pair "$(cat <work dir>/qr.txt)"`
+  stands in for the camera scan. Received items land in `<work dir>\received`.
+  PC → phone needs FCM and is tested on a real phone.
+- Translated Rust is slow, and the software renderer spends a core on
+  animations; time-sensitive checks (speeds, large files) belong on the phone.
