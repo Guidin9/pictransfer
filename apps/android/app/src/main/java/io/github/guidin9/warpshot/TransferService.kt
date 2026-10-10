@@ -169,8 +169,10 @@ object Store {
 
 object Notifier {
     const val PROGRESS_ID = 1
+    private const val SLOW_ID = 2
     private const val CH_RECEIVED = "received"
     private const val CH_PROGRESS = "progress"
+    private const val CH_CONNECTION = "connection"
     private val nextId = AtomicInteger(100)
 
     fun channels(ctx: Context) {
@@ -181,7 +183,27 @@ object Notifier {
         nm.createNotificationChannel(
             NotificationChannel(CH_PROGRESS, "Transfers in progress", NotificationManager.IMPORTANCE_LOW),
         )
+        nm.createNotificationChannel(
+            NotificationChannel(CH_CONNECTION, "Connection notices", NotificationManager.IMPORTANCE_DEFAULT),
+        )
     }
+
+    /** A transfer has had no direct path for a while (one notice, replaced on repeat). */
+    fun slowRoute(ctx: Context) = post(
+        ctx,
+        NotificationCompat.Builder(ctx, CH_CONNECTION)
+            .setSmallIcon(R.drawable.ic_notify)
+            .setAutoCancel(true)
+            .setContentTitle("Slow connection")
+            .setContentText("No direct connection to your PC; this transfer goes through the relay.")
+            .setStyle(
+                NotificationCompat.BigTextStyle().bigText(
+                    "No direct connection to your PC, so this transfer goes through the relay and may " +
+                        "take a while. Being on the same Wi-Fi network as the PC (not a repeater) is fastest.",
+                ),
+            ),
+        SLOW_ID,
+    )
 
     fun progress(ctx: Context): Notification =
         NotificationCompat.Builder(ctx, CH_PROGRESS)
@@ -244,13 +266,13 @@ object Notifier {
         }
     }.getOrNull()
 
-    private fun post(ctx: Context, b: NotificationCompat.Builder) {
+    private fun post(ctx: Context, b: NotificationCompat.Builder, id: Int = nextId.incrementAndGet()) {
         channels(ctx)
         if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
         ) {
             return
         }
-        NotificationManagerCompat.from(ctx).notify(nextId.incrementAndGet(), b.build())
+        NotificationManagerCompat.from(ctx).notify(id, b.build())
     }
 }

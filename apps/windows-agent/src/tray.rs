@@ -9,15 +9,17 @@ use std::io;
 
 use windows_sys::Win32::{
     Foundation::{HWND, POINT},
+    System::LibraryLoader::GetModuleHandleW,
     UI::{
         Shell::{
             NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NOTIFYICONDATAW,
             Shell_NotifyIconW,
         },
         WindowsAndMessaging::{
-            AppendMenuW, CheckMenuRadioItem, CreatePopupMenu, DestroyMenu, GetCursorPos, HMENU,
-            IDI_APPLICATION, LoadIconW, MF_BYCOMMAND, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING,
-            PostMessageW, RegisterWindowMessageW, SetForegroundWindow, TPM_RETURNCMD,
+            AppendMenuW, CheckMenuRadioItem, CreatePopupMenu, DestroyMenu, GetCursorPos,
+            GetSystemMetrics, HICON, HMENU, IDI_APPLICATION, IMAGE_ICON, LR_SHARED, LoadIconW,
+            LoadImageW, MF_BYCOMMAND, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, PostMessageW,
+            RegisterWindowMessageW, SM_CXSMICON, SM_CYSMICON, SetForegroundWindow, TPM_RETURNCMD,
             TPM_RIGHTBUTTON, TrackPopupMenu, WM_APP, WM_NULL,
         },
     },
@@ -57,15 +59,40 @@ fn nid(hwnd: HWND, tip: &str) -> NOTIFYICONDATAW {
     n.uID = TRAY_ID;
     n.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     n.uCallbackMessage = WM_TRAY;
-    // SAFETY: loads a shared system icon (not owned, never destroyed).
-    // TODO: embed the Warpshot icon as a resource (build script) and load it here.
-    n.hIcon = unsafe { LoadIconW(std::ptr::null_mut(), IDI_APPLICATION) };
+    n.hIcon = app_icon();
     // Leave room for the terminator (the array is zeroed).
     let cap = n.szTip.len().saturating_sub(1);
     for (dst, src) in n.szTip.iter_mut().take(cap).zip(tip.encode_utf16()) {
         *dst = src;
     }
     n
+}
+
+/// Resource id of the app icon (`res/agent.rc`).
+const ICON_ID: usize = 1;
+
+/// The embedded Warpshot icon at the small-icon size, or the system icon if the
+/// exe was built without resources. Both are shared: cached by the system after
+/// the first load and never destroyed.
+fn app_icon() -> HICON {
+    // SAFETY: `ICON_ID` as MAKEINTRESOURCE names a resource of our own module;
+    // LR_SHARED icons are owned by the system. LoadIconW with a null module
+    // loads a shared system icon.
+    unsafe {
+        let icon = LoadImageW(
+            GetModuleHandleW(std::ptr::null()),
+            ICON_ID as *const u16,
+            IMAGE_ICON,
+            GetSystemMetrics(SM_CXSMICON),
+            GetSystemMetrics(SM_CYSMICON),
+            LR_SHARED,
+        );
+        if icon.is_null() {
+            LoadIconW(std::ptr::null_mut(), IDI_APPLICATION)
+        } else {
+            icon
+        }
+    }
 }
 
 impl Tray {

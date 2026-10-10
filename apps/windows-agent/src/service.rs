@@ -247,6 +247,10 @@ pub struct Service {
     events: broadcast::Sender<Value>,
     ui: UiSink,
     next_transfer: AtomicU64,
+    /// Finished transfers by route (diagnostics, roadmap 4c).
+    route_direct: AtomicU64,
+    route_relay_only: AtomicU64,
+    route_slow: AtomicU64,
 }
 
 impl std::fmt::Debug for Service {
@@ -324,6 +328,9 @@ impl Service {
             events,
             ui,
             next_transfer: AtomicU64::new(1),
+            route_direct: AtomicU64::new(0),
+            route_relay_only: AtomicU64::new(0),
+            route_slow: AtomicU64::new(0),
         }))
     }
 
@@ -364,6 +371,28 @@ impl Service {
 
     fn emit(&self, name: &str, data: Value) {
         let _ = self.events.send(json!({"event": name, "data": data}));
+    }
+
+    /// The transfer has had no direct path for a while: it crawls through the
+    /// rate-limited relay. Say so once, so nobody waits silently (roadmap 4c).
+    fn slow_route(&self, direction: &str) {
+        self.emit("transfer.slow", json!({"direction": direction}));
+        self.toast(
+            "Slow connection",
+            concat!(
+                "No direct connection to your device, so this transfer goes through the ",
+                "relay and may take a while. Same Wi-Fi network (not a repeater) is fastest."
+            ),
+        );
+    }
+
+    fn count_route(&self, r: net::Route) {
+        let c = match (r.ever_direct, r.slow) {
+            (_, true) => &self.route_slow,
+            (true, false) => &self.route_direct,
+            (false, false) => &self.route_relay_only,
+        };
+        c.fetch_add(1, Ordering::Relaxed);
     }
 
     fn toast(&self, title: &str, body: &str) {
@@ -731,7 +760,16 @@ impl Service {
                 .saturating_mul(1 << 20),
             accept_large: false,
         };
-        let items = s.receive(&policy, |_| true).await?;
+        let conn = s.conn.clone();
+        let (items, route) = net::watch_route(
+            &conn,
+            net::SLOW_ROUTE_AFTER,
+            s.receive(&policy, |_| true),
+            || self.slow_route("in"),
+        )
+        .await;
+        self.count_route(route);
+        let items = items?;
         let peer_name = log
             .members()
             .get(&sender)
@@ -961,10 +999,16 @@ impl Service {
                 self.save(&dev);
             }
             let sent: Vec<Item> = p.items.iter().map(|o| o.item.clone()).collect();
-            let results = tokio::time::timeout(Duration::from_secs(3600), s.send_items(p.items))
-                .await
-                .map_err(|_| "timeout")?
-                .map_err(|e| net_code(&e))?;
+            let conn = s.conn.clone();
+            let (results, route) = net::watch_route(
+                &conn,
+                net::SLOW_ROUTE_AFTER,
+                tokio::time::timeout(Duration::from_secs(3600), s.send_items(p.items)),
+                || self.slow_route("out"),
+            )
+            .await;
+            self.count_route(route);
+            let results = results.map_err(|_| "timeout")?.map_err(|e| net_code(&e))?;
             if let Some(mut h) = self.history_store().await {
                 let keep = self.retention();
                 for it in &sent {
@@ -1355,6 +1399,9 @@ impl Service {
                     "ws_disconnects": c.ws_disconnects, "pings": c.pings, "pongs": c.pongs,
                     "missed_pongs": c.missed_pongs,
                     "transfers": self.next_transfer.load(Ordering::Relaxed).saturating_sub(1),
+                    "route_direct": self.route_direct.load(Ordering::Relaxed),
+                    "route_relay_only": self.route_relay_only.load(Ordering::Relaxed),
+                    "route_slow": self.route_slow.load(Ordering::Relaxed),
                     "endpoint_open": self.mgr.is_open().await,
                 }))
             }

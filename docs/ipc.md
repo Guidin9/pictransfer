@@ -39,7 +39,7 @@ The agent owns all state, keys and network access; the UI holds none of them.
 | `send.files` | `{paths: [string], target?: id}` | `{transfer: id}` |
 | `send.text` | `{text, target?: id}` | `{transfer: id}` |
 | `group.not_me` | `{id}` | `{}` — "This wasn't me": removes the device (reason `not-me`) |
-| `debug.counters` | – | `{ws_bytes_in, ws_bytes_out, transfers, ...}` (ids and counts only) |
+| `debug.counters` | – | `{ws_bytes_in, ws_bytes_out, transfers, route_direct, route_relay_only, route_slow, ...}` (ids and counts only; `route_*` count finished transfers by how they travelled, see `transfer.slow`) |
 
 `Settings` = `{hotkey, default_target, save_dir, ask_above_mb, relay_data, autostart,
 on_receive: {save, clipboard, notify, history}, history_days, history_items}`
@@ -55,6 +55,7 @@ on_receive: {save, clipboard, notify, history}, history_days, history_items}`
 | `pair.failed` | `{code: "expired" \| "proof" \| "rejected" \| "other-group" \| "network"}` |
 | `transfer.progress` | `{transfer, done_bytes, total_bytes}` (at most 4 per second) |
 | `transfer.done` | `{transfer, ok, code?}` |
+| `transfer.slow` | `{direction: "in" \| "out"}` — a transfer has had no direct path for 8 s and crawls through the rate-limited relay; sent once per transfer (the agent also shows a toast) |
 | `group.alert` | `{kind: "device-added", id, name, platform, by_name}` (§4.6; the UI offers "This wasn't me") |
 | `group.fork` | `{}` — security alert: transfers are stopped until re-pairing (§4.5) |
 | `history.changed` | `{}` — reload the history list |

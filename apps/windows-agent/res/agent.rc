@@ -1,0 +1,2 @@
+// Resource id 1: the app icon (tray.rs loads it; Explorer uses the first icon).
+1 ICON "../../windows-ui/src-tauri/icons/icon.ico"

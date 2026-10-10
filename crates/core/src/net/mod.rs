@@ -10,9 +10,10 @@ pub mod xfer;
 
 use std::{fmt, time::Duration};
 
+pub use iroh::endpoint::Connection;
 use iroh::{
     Endpoint, EndpointAddr, RelayMode, SecretKey, TransportAddr,
-    endpoint::{Connection, RecvStream, SendStream, VarInt, presets},
+    endpoint::{RecvStream, SendStream, VarInt, presets},
 };
 
 use crate::{
@@ -296,6 +297,164 @@ pub async fn require_direct(conn: &Connection, timeout: Duration) -> Result<(), 
     }
 }
 
+/// A transfer that has had no direct path for this long is "slow": it crawls
+/// through the rate-limited public relay and the user should know why
+/// (roadmap 4c). Direct paths normally win within 1–2 s, so short transfers
+/// never trigger it.
+pub const SLOW_ROUTE_AFTER: Duration = Duration::from_secs(8);
+
+/// How a transfer travelled (diagnostics; no addresses).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Route {
+    /// A direct path was selected at some point.
+    pub ever_direct: bool,
+    /// The transfer ran on the relay alone for [`SLOW_ROUTE_AFTER`].
+    pub slow: bool,
+}
+
+/// Runs `work` while watching the paths of `conn`; calls `on_slow` once when
+/// the transfer has had no direct path for `slow_after` in a row. Runs in the
+/// caller's task: no spawn, no polling (path events and one timer that exists
+/// only while relayed).
+pub async fn watch_route<T>(
+    conn: &Connection,
+    slow_after: Duration,
+    work: impl Future<Output = T>,
+    on_slow: impl FnOnce(),
+) -> (T, Route) {
+    route_loop(
+        || is_direct(conn),
+        conn.path_events(),
+        slow_after,
+        work,
+        on_slow,
+    )
+    .await
+}
+
+/// [`watch_route`] with the path source abstracted (unit-testable): `direct`
+/// is re-read after every item of `events`.
+async fn route_loop<T, E>(
+    direct: impl Fn() -> bool,
+    events: impl n0_future::Stream<Item = E>,
+    slow_after: Duration,
+    work: impl Future<Output = T>,
+    on_slow: impl FnOnce(),
+) -> (T, Route) {
+    use n0_future::StreamExt;
+    tokio::pin!(work);
+    tokio::pin!(events);
+    let mut events_open = true;
+    let mut on_slow = Some(on_slow);
+    let mut route = Route::default();
+    let mut relayed_since: Option<tokio::time::Instant> = None;
+    loop {
+        let now_direct = direct();
+        route.ever_direct |= now_direct;
+        relayed_since = if now_direct {
+            None
+        } else {
+            relayed_since.or_else(|| Some(tokio::time::Instant::now()))
+        };
+        let deadline = relayed_since
+            .filter(|_| !route.slow)
+            .and_then(|t| t.checked_add(slow_after));
+        let timer = async {
+            match deadline {
+                Some(d) => tokio::time::sleep_until(d).await,
+                None => std::future::pending().await,
+            }
+        };
+        tokio::select! {
+            out = &mut work => return (out, route),
+            ev = events.next(), if events_open => events_open = ev.is_some(),
+            () = timer => {
+                route.slow = true;
+                if let Some(f) = on_slow.take() {
+                    f();
+                }
+            }
+        }
+    }
+}
+
+/// A path change, without addresses (logs carry kinds and timings only).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PathNote {
+    Opened {
+        id: String,
+        kind: &'static str,
+    },
+    Selected {
+        id: String,
+        kind: &'static str,
+    },
+    Closed {
+        id: String,
+        kind: &'static str,
+        rtt_ms: u128,
+        tx_bytes: u64,
+        rx_bytes: u64,
+        lost_packets: u64,
+    },
+    Lagged,
+}
+
+/// The class of a path's remote address — never the address itself.
+fn addr_kind(a: &TransportAddr) -> &'static str {
+    match a {
+        TransportAddr::Ip(sa) => match sa.ip() {
+            std::net::IpAddr::V4(v4) if v4.is_private() || v4.is_link_local() => "lan4",
+            std::net::IpAddr::V4(v4) if v4.is_loopback() => "loop",
+            std::net::IpAddr::V4(_) => "wan4",
+            std::net::IpAddr::V6(v6) if v6.is_unique_local() || v6.is_unicast_link_local() => {
+                "lan6"
+            }
+            std::net::IpAddr::V6(_) => "wan6",
+        },
+        TransportAddr::Relay(_) => "relay",
+        _ => "other",
+    }
+}
+
+/// Reports path changes of `conn` until it closes (diagnostics for the
+/// direct-vs-relay question; see roadmap 4c).
+pub async fn watch_paths(conn: &Connection, mut note: impl FnMut(PathNote)) {
+    use iroh::endpoint::PathEvent;
+    use n0_future::StreamExt;
+    let mut events = conn.path_events();
+    while let Some(ev) = events.next().await {
+        note(match ev {
+            PathEvent::Opened {
+                id, remote_addr, ..
+            } => PathNote::Opened {
+                id: id.to_string(),
+                kind: addr_kind(&remote_addr),
+            },
+            PathEvent::Selected {
+                id, remote_addr, ..
+            } => PathNote::Selected {
+                id: id.to_string(),
+                kind: addr_kind(&remote_addr),
+            },
+            PathEvent::Closed {
+                id,
+                remote_addr,
+                last_stats,
+                ..
+            } => PathNote::Closed {
+                id: id.to_string(),
+                kind: addr_kind(&remote_addr),
+                rtt_ms: last_stats.rtt.as_millis(),
+                tx_bytes: last_stats.udp_tx.bytes,
+                rx_bytes: last_stats.udp_rx.bytes,
+                lost_packets: last_stats.lost_packets,
+            },
+            _ => PathNote::Lagged,
+        });
+    }
+}
+
 /// The application close code the peer used, if the connection was closed by it.
 pub fn peer_close_code(conn: &Connection) -> Option<u32> {
     match conn.close_reason()? {
@@ -317,5 +476,99 @@ pub fn explain(conn: &Connection, e: NetError) -> NetError {
 impl From<crate::client::ClientError> for NetError {
     fn from(e: crate::client::ClientError) -> Self {
         Self::Server(e)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::arithmetic_side_effects)]
+mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    use n0_future::stream;
+
+    use super::*;
+
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
+    /// Path events at the given offsets; each one first sets `direct`.
+    fn script(
+        direct: Arc<AtomicBool>,
+        steps: Vec<(u64, bool)>,
+    ) -> impl n0_future::Stream<Item = ()> {
+        stream::unfold((steps.into_iter(), 0u64), move |(mut it, at)| {
+            let direct = Arc::clone(&direct);
+            async move {
+                let (t, d) = it.next()?;
+                tokio::time::sleep(ms(t.saturating_sub(at))).await;
+                direct.store(d, Ordering::SeqCst);
+                Some(((), (it, t)))
+            }
+        })
+    }
+
+    async fn run(start_direct: bool, steps: Vec<(u64, bool)>, work_ms: u64) -> (usize, Route) {
+        let direct = Arc::new(AtomicBool::new(start_direct));
+        let events = script(Arc::clone(&direct), steps);
+        let mut fired = 0;
+        let ((), route) = route_loop(
+            || direct.load(Ordering::SeqCst),
+            events,
+            ms(50),
+            tokio::time::sleep(ms(work_ms)),
+            || fired += 1,
+        )
+        .await;
+        (fired, route)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn relay_only_alerts_once() {
+        let (fired, route) = run(false, vec![], 200).await;
+        assert_eq!(fired, 1);
+        assert_eq!(
+            route,
+            Route {
+                ever_direct: false,
+                slow: true
+            }
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn direct_never_alerts() {
+        let (fired, route) = run(true, vec![], 150).await;
+        assert_eq!(fired, 0);
+        assert_eq!(
+            route,
+            Route {
+                ever_direct: true,
+                slow: false
+            }
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn short_transfer_on_relay_does_not_alert() {
+        let (fired, route) = run(false, vec![], 20).await;
+        assert_eq!(fired, 0);
+        assert!(!route.slow);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_direct_spell_restarts_the_clock() {
+        // Relay 0–30, direct 30–70, relay from 70: the 50 ms deadline moves to
+        // 120, after the work ends at 110.
+        let (fired, route) = run(false, vec![(30, true), (70, false)], 110).await;
+        assert_eq!(fired, 0);
+        assert!(route.ever_direct && !route.slow);
+        // The same path changes with longer work do alert, once.
+        let (fired, route) = run(false, vec![(30, true), (70, false)], 220).await;
+        assert_eq!(fired, 1);
+        assert!(route.ever_direct && route.slow);
     }
 }

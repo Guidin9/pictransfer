@@ -107,6 +107,18 @@ Faz 3 (public release) adds code signing (SignPath Foundation), the Play Store,
 a self-host option, TPM keys, UnifiedPush/F-Droid, reproducible builds and an
 external audit.
 
+## Project end: full documentation (user request, 2026-10-10)
+
+Before the project is called done, write detailed documentation on every
+aspect of the app, for the user as well as for contributors: what it does and
+how to use it on both platforms (pairing, sending, history, settings, removing
+a lost device); how it works (direct path vs. relay, what our server does and
+does not see, wake-ups, the device group and its log, the encryption layers);
+installation, update and uninstall; troubleshooting (slow transfers, firewall,
+Doze, notifications); privacy and security in plain language; self-deployment
+of the server; building from source; and a glossary of terms (relay, direct
+path, NAT, port mapping, endpoint, membership log).
+
 ## Next session (from the user's testing, 2026-10-10)
 
 1. **Mobile UI redesign** (Compose): onboarding, paired screen, share sheet card.
@@ -118,7 +130,7 @@ external audit.
    total and speed, so a 250 MB video shows it's moving. Needs per-chunk
    progress from `net::xfer` → FFI callback → Kotlin; agent emits
    `transfer.progress` (docs/ipc.md).
-4. **Tray icon has no logo** (shows blank in hidden icons): load a real
+4. ✓ **Tray icon has no logo** (shows blank in hidden icons): load a real
    icon resource in `tray.rs`, embed it in the exe.
 4b. **Active transfers view + cancel (both platforms):** a long send (video,
    Android → PC) keeps running silently in the background after leaving the
@@ -128,18 +140,24 @@ external audit.
    in the Windows UI and tray with progress and Cancel; cancellation in core
    (`net::xfer` aborts the stream, closes with a cancel code, cleans temp
    files on the receiver) exposed via FFI and `transfer.cancel` (docs/ipc.md).
-4c. **LAN speed (high priority):** a 258 MB video Android → PC took 27 min
-   (~167 KB/s) on the same LAN — the direct path dies (Windows "Public"
-   firewall) and everything goes through the public relay. Add the firewall
-   rule (local subnet, UDP, agent exe; one UAC prompt) and/or find why the
-   direct path drops; target LAN speed (tens of MB/s).
+4c. ✓ **LAN speed (2026-10-10):** measured (spikes.md "Phone ↔ PC routes"):
+   on the same AP the direct path works at Wi-Fi speed (100 MB in 13 s, no
+   firewall rule needed); the 27 min came from a repeater AP that breaks ARP
+   between the phone and the wired PC, so everything went through the
+   rate-limited n0 relay. Done in the app: a "Slow connection" notice after
+   8 s on the relay (PC toast + `transfer.slow` event; Android notification
+   via the FFI `TransferObserver`) and route counters (`debug.counters`
+   `route_*`, Android logcat line). Live check: PC → phone 20 MB with the
+   phone on the repeater took 73 s on the relay; both notices appeared and
+   `route_slow` counted it. Tray icon embedded (item 4).
+   **Open decision (user, later):** our own relay for fast non-direct
+   transfers (a small VPS or a free cloud VM; not $0-by-default).
 5. **Windows UI history bug:** the "Klasörde göster" (reveal in folder)
    button overlaps the text behind it in the history list; fix the layout.
 6. **Security tests for key theft:** stolen-key scenario, revocation
    ("lost or stolen") refusal, whether past transfers stay safe (forward
    secrecy) — add to the security plan below.
-7. Open: Doze/locked-phone delivery test; optional Windows firewall rule for
-   LAN (direct path); iroh transient threads after transfers; delete the
+7. Open: Doze/locked-phone delivery test; iroh transient threads after transfers; delete the
    orphaned first Firebase key; redeploy the server (BOM-tolerant FCM
    parse); push to GitHub.
 

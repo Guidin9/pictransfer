@@ -32,6 +32,7 @@ Results:
 | Date | Device | A1 | A2 (LAN / x-net / relay) | A4 | A5 | A6 | Notes |
 |---|---|---|---|---|---|---|---|
 | 2026-10-09 | PC ↔ PC (same Win11 host, 12 threads), EU relay, slow home uplink | bind 27–82 ms ✓; home relay online 0.77–1.15 s ✗ | 33–51 ms bind→connected ✓ / pending (phone) / 400–561 ms | 128–166 MB/s ✓; relay 0.5 MB/s (10 MB) | 0.9 → peak 5.0–6.7 → 3.6 MB; 0.07 MB after trim ✓ | all ✓ | see below |
+| 2026-10-10 | S21 FE (Android 16, Wi-Fi 11n) → PC (Ethernet), same router, `warpctl` | – | see "Phone ↔ PC routes" below | main AP: 100 MB in 13.1 s (7.6 MB/s), 20 MB in 3.5 s; via a repeater AP: no lasting direct path, relay only, 20 MB not done in 90 s | – | – | below |
 | – | Android | – | – | – | – | – | pending, run with Spike D on the phone |
 
 Probe: `spikes/iroh-probe` (iroh 1.3.0, `default-features = false`, `tls-ring`;
@@ -66,6 +67,38 @@ Findings and the API usage they fix:
 - **A7:** `x-wing` chosen (ADR 0008).
 - Path events show several IP paths opening and closing within the first ~30 ms
   (multiple local interfaces); harmless.
+
+### Phone ↔ PC routes (roadmap 4c, 2026-10-10)
+
+Why the 258 MB video took 27 min (~167 KB/s). Measured with `warpctl` on both
+sides (the Android build needs `CARGO_PROFILE_RELEASE_PANIC=unwind`: without a
+JVM, iroh's DNS setup panics and falls back only when unwinding) and the
+`path` events from `net::watch_paths` (address class only).
+
+- **Same AP:** the direct `lan4` path is selected within ~120 ms and carries
+  everything; 7.6 MB/s is about the phone's 11n Wi-Fi limit. The Windows
+  "Public" firewall does not block it (outbound UDP opens the return path),
+  so no firewall rule is needed.
+- **Phone on a second AP of the same network (a repeater):** direct `lan4`
+  paths open, carry a few KB and die after `PATH_IDLE` (4 s), again and again;
+  PC → phone packets arrive, phone → PC mostly do not. Cause: the repeater
+  proxies ARP (every host appears with the repeater's MAC) and the phone's ARP
+  requests for the PC go unanswered (`ip neigh`: PC `INCOMPLETE`/`FAILED`,
+  router `REACHABLE`, 5 of 5 tries). The phone learns the PC only briefly from
+  the PC's own ARP traffic. Not fixable in the app; an AP in access-point
+  (wired) mode or a mesh avoids it.
+- **Relay:** the free n0 relay is rate-limited (ADR 0001): 0.5 MB/s PC ↔ PC,
+  ~0.17 MB/s from the phone, RTT up to 4 s under load. Only a relay of our own
+  makes non-direct transfers fast (open decision, roadmap).
+- **Ruled out:** packet size (no MTU discovery: same loss); port mapping
+  (iroh `portmapper`): one run looked better, but the phone had silently
+  roamed back to the main AP; the repeat failed. Neither is enabled.
+- **Untried idea:** keeping the phone's neighbour entry fresh by having the PC
+  send ARP requests during a transfer (`SendARP`); blocking API, needs a
+  thread, uncertain. Not pursued.
+- **Pitfalls:** ping is not a reachability test here (Windows drops ICMP echo
+  on "Public"); Android may switch APs on its own, so record the AP before and
+  after each run.
 
 ## Spike B — agent skeleton vs the idle budget
 

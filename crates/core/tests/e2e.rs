@@ -175,7 +175,23 @@ async fn pair_then_transfer_both_ways() {
         net::require_direct(&s.conn, std::time::Duration::from_secs(5))
             .await
             .unwrap();
-        s.send_items(items).await
+        let conn = s.conn.clone();
+        // Direct all the way: the slow-route alert must stay silent.
+        let (out, route) = net::watch_route(
+            &conn,
+            std::time::Duration::from_millis(1),
+            s.send_items(items),
+            || panic!("slow alert on a direct path"),
+        )
+        .await;
+        assert_eq!(
+            route,
+            net::Route {
+                ever_direct: true,
+                slow: false
+            }
+        );
+        out
     };
     let (r, s) = tokio::join!(recv, send);
     let (r, s) = (r.unwrap(), s.unwrap());

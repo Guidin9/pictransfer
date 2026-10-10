@@ -77,6 +77,16 @@ pub trait PairConfirm: Send + Sync {
     fn confirm(&self, sas: String, peer_name: String, peer_platform: u64) -> bool;
 }
 
+/// Transfer notices for the UI (roadmap 4c; progress will follow). Called on
+/// the runtime's threads; implementations must not block.
+#[uniffi::export(foreign)]
+pub trait TransferObserver: Send + Sync {
+    /// No direct path for a while: the transfer crawls through the relay.
+    fn on_slow_route(&self, incoming: bool);
+    /// A transfer finished (diagnostics: route kind and duration, no addresses).
+    fn on_route(&self, incoming: bool, ever_direct: bool, slow: bool, duration_ms: u64);
+}
+
 struct KsAdapter(Arc<dyn PlatformKeystore>);
 
 impl Keystore for KsAdapter {
@@ -150,6 +160,7 @@ pub struct Warpshot {
     mgr: Arc<EndpointManager>,
     replay: Mutex<ReplayCache>,
     pending: Mutex<PendingSessions>,
+    observer: std::sync::Mutex<Option<Arc<dyn TransferObserver>>>,
     rt: tokio::runtime::Runtime,
 }
 
@@ -160,6 +171,32 @@ impl std::fmt::Debug for Warpshot {
 }
 
 impl Warpshot {
+    fn observer(&self) -> Option<Arc<dyn TransferObserver>> {
+        self.observer.lock().ok().and_then(|o| o.clone())
+    }
+
+    /// Runs `work` (one transfer on `conn`) and reports its route to the observer.
+    async fn observed<T>(
+        &self,
+        conn: &net::Connection,
+        incoming: bool,
+        work: impl Future<Output = T>,
+    ) -> T {
+        let started = std::time::Instant::now();
+        let obs = self.observer();
+        let (out, route) = net::watch_route(conn, net::SLOW_ROUTE_AFTER, work, || {
+            if let Some(o) = &obs {
+                o.on_slow_route(incoming);
+            }
+        })
+        .await;
+        if let Some(o) = &obs {
+            let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+            o.on_route(incoming, route.ever_direct, route.slow, ms);
+        }
+        out
+    }
+
     /// Runs the in-band log sync (§8.5) and persists the log if it changed.
     async fn sync_session(
         &self,
@@ -233,8 +270,16 @@ impl Warpshot {
             mgr,
             replay: Mutex::new(ReplayCache::default()),
             pending: Mutex::new(PendingSessions::default()),
+            observer: std::sync::Mutex::new(None),
             rt,
         }))
+    }
+
+    /// Sets (or clears) the observer for transfer notices.
+    pub fn set_observer(&self, observer: Option<Arc<dyn TransferObserver>>) {
+        if let Ok(mut o) = self.observer.lock() {
+            *o = observer;
+        }
     }
 }
 
@@ -449,7 +494,10 @@ impl Warpshot {
                     max_size: 500 << 20,
                     accept_large: false,
                 };
-                let items = s.receive(&policy, |_| true).await?;
+                let conn = s.conn.clone();
+                let items = self
+                    .observed(&conn, true, s.receive(&policy, |_| true))
+                    .await?;
                 Ok(items
                     .into_iter()
                     .map(|r| ReceivedItem {
@@ -544,7 +592,13 @@ impl Warpshot {
             // §8.5: both peers run the log sync step before any transfer.
             let mut synced = log.clone();
             self.sync_session(&mut s, &mut synced).await?;
-            let results = tokio::time::timeout(Duration::from_secs(3600), s.send_items(p.items))
+            let conn = s.conn.clone();
+            let results = self
+                .observed(
+                    &conn,
+                    false,
+                    tokio::time::timeout(Duration::from_secs(3600), s.send_items(p.items)),
+                )
                 .await
                 .map_err(|_| WarpError::Network {
                     code: warpshot_core::xfer::code::TIMEOUT,

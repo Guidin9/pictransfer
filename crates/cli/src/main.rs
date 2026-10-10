@@ -208,6 +208,21 @@ async fn accept_alpn(
     }
 }
 
+/// Emits path changes (direct vs relay, no addresses) with ms since `t0`.
+fn trace_paths(conn: &iroh::endpoint::Connection, t0: std::time::Instant) {
+    let c = conn.clone();
+    tokio::spawn(async move {
+        net::watch_paths(&c, |n| {
+            emit(format!(
+                "{{\"ev\":\"path\",\"t_ms\":{},\"note\":{}}}",
+                t0.elapsed().as_millis(),
+                json_str(&format!("{n:?}"))
+            ))
+        })
+        .await;
+    });
+}
+
 async fn run(a: Args) -> Result<(), String> {
     match a.cmd.as_str() {
         "init" => {
@@ -315,6 +330,8 @@ async fn run(a: Args) -> Result<(), String> {
                 .await
                 .map_err(|e| e.to_string())?;
             if let Some(f) = &a.addr_file {
+                // Give QUIC address discovery and the port mapper a moment.
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 write_addr(f, &dev.id(), &net::dial_info(&ep))?;
             }
             emit(format!(
@@ -323,9 +340,11 @@ async fn run(a: Args) -> Result<(), String> {
             ));
             loop {
                 let conn = accept_alpn(&ep, warpshot_core::xfer::ALPN).await?;
+                let t0 = std::time::Instant::now();
+                trace_paths(&conn, t0);
                 let mut log = dev.log.clone().ok_or("not paired")?;
                 let res = async {
-                    let mut s = nx::accept(&ep, conn, &log).await?;
+                    let mut s = nx::accept(&ep, conn.clone(), &log).await?;
                     if s.sync_logs(&mut log, now_ms()).await? {
                         dev.log = Some(log.clone());
                         save(&dev, &a.dir).map_err(|_| NetError::State("save"))?;
@@ -343,6 +362,11 @@ async fn run(a: Args) -> Result<(), String> {
                 .await;
                 match res {
                     Ok(items) => {
+                        emit(format!(
+                            "{{\"ev\":\"done\",\"ms\":{},\"direct\":{}}}",
+                            t0.elapsed().as_millis(),
+                            net::is_direct(&conn)
+                        ));
                         for r in items {
                             let path = r
                                 .path
@@ -405,6 +429,7 @@ async fn run(a: Args) -> Result<(), String> {
                 .await
                 .map_err(|e| format!("dial: {e}"))?;
             let connect_ms = t0.elapsed().as_millis();
+            trace_paths(&s.conn, t0);
             if s.sync_logs(&mut log, now_ms())
                 .await
                 .map_err(|e| e.to_string())?
