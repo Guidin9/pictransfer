@@ -130,6 +130,7 @@ pub async fn bind(ik: &IdentityKey, relay: Relay) -> Result<Endpoint, NetError> 
     let transport = iroh::endpoint::QuicTransportConfig::builder()
         .default_path_max_idle_timeout(PATH_IDLE)
         .default_path_keep_alive_interval(PATH_KEEPALIVE)
+        .enable_segmentation_offload(SEGMENTATION_OFFLOAD)
         .build();
     let ep = Endpoint::builder(presets::Minimal)
         .secret_key(sk)
@@ -149,6 +150,15 @@ pub async fn bind(ik: &IdentityKey, relay: Relay) -> Result<Endpoint, NetError> 
     }
     Ok(ep)
 }
+
+/// UDP segmentation offload (GSO) for QUIC sends. Off on Android: on the
+/// S21 FE (Android 16, Wi-Fi) GSO batches to a LAN peer were silently lost
+/// after the first ~100 KB of each direct path, so phone → PC transfers fell
+/// back to the rate-limited relay (~0.4 MB/s) while QUIC counted the packets
+/// as sent; plain UDP at 3.6 MB/s and TCP were fine. Without GSO the same
+/// 20 MB went direct in 4–5 s, 3 of 3 runs, vs 49 s–timeout with it
+/// (docs/spikes.md "Phone ↔ PC routes", 2026-10-10). Windows keeps it.
+pub const SEGMENTATION_OFFLOAD: bool = !cfg!(target_os = "android");
 
 /// How long [`bind`] waits for the home relay connection.
 pub const RELAY_WAIT: Duration = Duration::from_secs(5);

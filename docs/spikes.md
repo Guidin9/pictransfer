@@ -90,6 +90,23 @@ JVM, iroh's DNS setup panics and falls back only when unwinding) and the
 - **Relay:** the free n0 relay is rate-limited (ADR 0001): 0.5 MB/s PC ↔ PC,
   ~0.17 MB/s from the phone, RTT up to 4 s under load. Only a relay of our own
   makes non-direct transfers fast (open decision, roadmap).
+- **Root cause of slow phone → PC (2026-10-10, later the same day): UDP
+  segmentation offload (GSO) on the phone.** With the phone on the main AP
+  (RSSI −22…−30, no roaming) phone → PC still fell back to the relay
+  (~0.4 MB/s, `direct=true slow=true`), with the app and with `warpctl`
+  (`serve`/`fetch`, either side dialing, relay on or off). Findings in order:
+  pktmon on the PC: the phone's packets never reached the NIC (93 of
+  hundreds), Windows dropped 3 → not the firewall ("Public" vs "Private"
+  made no difference); TCP phone → PC 4.2 MB/s and paced plain UDP up to
+  3000 × 1200 B/s ≈ 3.6 MB/s arrived complete → not the router; QUIC on the
+  phone sent ~100 KB per direct path, counted it as sent with no loss and
+  stalled until the path idled out (iroh/noq then move data to the relay;
+  see noq #516/#799/#803). Turning GSO off on the phone
+  (`QuicTransportConfig::enable_segmentation_offload(false)`): 20 MB in
+  4.1–5.0 s on `lan4`, 3/3, vs 49 s–timeout with GSO, 3/3; final build 3/3
+  in 3.6–4.3 s; PC → phone 10 MB in 1.7 s. Now `net::SEGMENTATION_OFFLOAD`
+  is off on Android only. The earlier "repeater AP" explanation above may
+  have been the same fault (not re-tested).
 - **Ruled out:** packet size (no MTU discovery: same loss); port mapping
   (iroh `portmapper`): one run looked better, but the phone had silently
   roamed back to the main AP; the repeat failed. Neither is enabled.

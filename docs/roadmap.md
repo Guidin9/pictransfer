@@ -166,6 +166,9 @@ path, NAT, port mapping, endpoint, membership log).
    `route_*`, Android logcat line). Live check: PC → phone 20 MB with the
    phone on the repeater took 73 s on the relay; both notices appeared and
    `route_slow` counted it. Tray icon embedded (item 4).
+   **Update (2026-10-10, later):** the real cause of slow phone → PC was
+   UDP segmentation offload on the phone (spikes.md); GSO is now off on
+   Android and phone → PC goes direct at Wi-Fi speed on "Public" networks too.
    **Open decision (user, later):** our own relay for fast non-direct
    transfers (a small VPS or a free cloud VM; not $0-by-default).
 5. ✓ **Windows UI history bug:** long names were cut off hard at the

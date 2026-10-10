@@ -93,7 +93,7 @@ fn parse_args() -> Result<Args, String> {
 }
 
 fn usage() -> String {
-    "usage: warpctl <init|pair-display|pair-scan QR|listen|send DEVICE [PATH]|devices|log|remove DEVICE> \
+    "usage: warpctl <init|pair-display|pair-scan QR|listen|send DEVICE [PATH]|serve DEVICE PATH|fetch DEVICE|devices|log|remove DEVICE> \
      [--dir D] [--name N] [--platform windows|android] [--no-relay] [--addr-file F] [--out DIR] [--text T] [--yes] [--once]"
         .into()
 }
@@ -450,6 +450,128 @@ async fn run(a: Args) -> Result<(), String> {
             if !ok {
                 return Err("some items failed".into());
             }
+        }
+        // The app's wake-driven shape (§7.4): the listener holds the items and
+        // the dialer receives them. `serve` listens and offers PATH to DEVICE
+        // once it dials; `fetch` dials with a session and receives.
+        "serve" => {
+            let mut dev = load(&a.dir)?;
+            let mut log = dev.log.clone().ok_or("not paired")?;
+            let target = find_device(&log, a.pos.first().ok_or("serve needs a device")?)?;
+            let path = a.pos.get(1).ok_or("serve needs a path")?;
+            let items =
+                vec![nx::file_item(2, Path::new(path), now_ms()).map_err(|e| e.to_string())?];
+            let ep = net::bind(&dev.keys.ik, a.relay)
+                .await
+                .map_err(|e| e.to_string())?;
+            if let Some(f) = &a.addr_file {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                write_addr(f, &dev.id(), &net::dial_info(&ep))?;
+            }
+            emit("{\"ev\":\"serving\"}".into());
+            let conn = accept_alpn(&ep, warpshot_core::xfer::ALPN).await?;
+            let t0 = std::time::Instant::now();
+            trace_paths(&conn, t0);
+            let mut s = nx::accept(&ep, conn, &log)
+                .await
+                .map_err(|e| format!("accept: {e}"))?;
+            if s.peer != target {
+                return Err("unexpected peer".into());
+            }
+            if s.sync_logs(&mut log, now_ms())
+                .await
+                .map_err(|e| e.to_string())?
+            {
+                dev.log = Some(log);
+                save(&dev, &a.dir)?;
+            }
+            let results = s
+                .send_items(items)
+                .await
+                .map_err(|e| format!("send: {e}"))?;
+            emit(format!(
+                "{{\"ev\":\"served\",\"ok\":{},\"total_ms\":{}}}",
+                results.iter().all(|(_, ok)| *ok),
+                t0.elapsed().as_millis()
+            ));
+            ep.close().await;
+        }
+        "fetch" => {
+            let mut dev = load(&a.dir)?;
+            let mut log = dev.log.clone().ok_or("not paired")?;
+            let target = find_device(&log, a.pos.first().ok_or("fetch needs a device")?)?;
+            let (aid, dial) = read_addr(a.addr_file.as_deref().ok_or("fetch needs --addr-file")?)?;
+            if aid != target {
+                return Err("address file is for another device".into());
+            }
+            let out = a.out.clone().unwrap_or_else(|| a.dir.join("received"));
+            std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+            let ep = net::bind(&dev.keys.ik, a.relay)
+                .await
+                .map_err(|e| e.to_string())?;
+            let t0 = std::time::Instant::now();
+            let mut s = nx::dial(&ep, &log, &target, &dial, [1; 16])
+                .await
+                .map_err(|e| format!("dial: {e}"))?;
+            trace_paths(&s.conn, t0);
+            if s.sync_logs(&mut log, now_ms())
+                .await
+                .map_err(|e| e.to_string())?
+            {
+                dev.log = Some(log);
+                save(&dev, &a.dir)?;
+            }
+            let conn = s.conn.clone();
+            let items = s
+                .receive(
+                    &Policy {
+                        dir: out,
+                        max_size: 500 << 20,
+                        accept_large: a.accept_large,
+                    },
+                    |_| true,
+                )
+                .await
+                .map_err(|e| format!("receive: {e}"))?;
+            emit(format!(
+                "{{\"ev\":\"fetched\",\"items\":{},\"ms\":{},\"direct\":{}}}",
+                items.len(),
+                t0.elapsed().as_millis(),
+                net::is_direct(&conn)
+            ));
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            ep.close().await;
+        }
+        // Network diagnostics (roadmap 4c): paced 1200-byte UDP datagrams from
+        // local port 6000 to ADDR for SECONDS at RATE packets per second.
+        "udp-blast" => {
+            let addr: std::net::SocketAddr = a
+                .pos
+                .first()
+                .ok_or("udp-blast ADDR RATE SECONDS")?
+                .parse()
+                .map_err(|_| "bad addr")?;
+            let rate: u64 = a.pos.get(1).and_then(|r| r.parse().ok()).unwrap_or(500);
+            let secs: u64 = a.pos.get(2).and_then(|r| r.parse().ok()).unwrap_or(10);
+            let sock = tokio::net::UdpSocket::bind("0.0.0.0:6000")
+                .await
+                .map_err(|e| e.to_string())?;
+            let mut buf = vec![0u8; 1200];
+            let gap = std::time::Duration::from_micros(1_000_000 / rate.max(1));
+            let t0 = tokio::time::Instant::now();
+            let mut sent = 0u64;
+            let mut next = t0;
+            while t0.elapsed().as_secs() < secs {
+                if let Some(head) = buf.get_mut(..8) {
+                    head.copy_from_slice(&sent.to_be_bytes());
+                }
+                if sock.send_to(&buf, addr).await.is_ok() {
+                    sent += 1;
+                }
+                next += gap;
+                tokio::time::sleep_until(next).await;
+            }
+            emit(format!("{{\"ev\":\"blasted\",\"sent\":{sent}}}"));
         }
         "devices" => {
             let dev = load(&a.dir)?;
