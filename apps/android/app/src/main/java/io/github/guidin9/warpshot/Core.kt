@@ -80,6 +80,10 @@ class CoreObserver(private val ctx: Context) : TransferObserver {
 
     override fun onSlowRoute(incoming: Boolean) = Notifier.slowRoute(ctx)
 
+    override fun onPath(incoming: Boolean, ms: ULong, note: String) {
+        Log.i("Warpshot", "path ${if (incoming) "in" else "out"} +${ms}ms $note")
+    }
+
     override fun onRoute(incoming: Boolean, everDirect: Boolean, slow: Boolean, durationMs: ULong) {
         Log.i("Warpshot", "transfer ${if (incoming) "in" else "out"} direct=$everDirect slow=$slow ms=$durationMs")
     }

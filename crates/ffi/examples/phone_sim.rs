@@ -59,6 +59,7 @@ impl TransferObserver for Printer {
         }
     }
     fn on_slow_route(&self, _incoming: bool) {}
+    fn on_path(&self, _incoming: bool, _ms: u64, _note: String) {}
     fn on_route(&self, _incoming: bool, _direct: bool, _slow: bool, _ms: u64) {}
 }
 

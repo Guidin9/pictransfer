@@ -66,6 +66,7 @@ offer). `waiting`: queued, or waiting for the woken device to answer;
 | `transfer.started` | `Transfer` — a send or receive began (state `waiting`) |
 | `transfer.progress` | `{transfer, done_bytes, total_bytes, bytes_per_sec}` — the first one (`done_bytes: 0`) means `running`; then at most 4 per second, and one at the end |
 | `transfer.done` | `{transfer, ok, code?}` — `code`: `cancelled` (here or on the other device; no toast), `offline`, `no-answer`, `rejected`, `timeout`, `network`, ... |
+| `transfer.path` | `{transfer, direction, ms, note}` — diagnostics: a path of the transfer opened, was selected or closed (`note` names the address class — `lan4`, `wan4`, `relay`, ... — and, on close, RTT, bytes and lost packets; never an address) |
 | `transfer.slow` | `{direction: "in" \| "out"}` — a transfer has had no direct path for 8 s and crawls through the rate-limited relay; sent once per transfer (the agent also shows a toast) |
 | `group.alert` | `{kind: "device-added", id, name, platform, by_name}` (§4.6; the UI offers "This wasn't me") |
 | `group.fork` | `{}` — security alert: transfers are stopped until re-pairing (§4.5) |

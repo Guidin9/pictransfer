@@ -424,6 +424,30 @@ fn addr_kind(a: &TransportAddr) -> &'static str {
     }
 }
 
+/// Runs `work` in the caller's task while reporting path changes of `conn`
+/// (diagnostics; address classes only). After `work` ends it waits up to
+/// 500 ms for the `Closed` notes, which carry each path's byte counts.
+pub async fn with_path_notes<T>(
+    conn: &Connection,
+    work: impl Future<Output = T>,
+    mut note: impl FnMut(PathNote),
+) -> T {
+    let paths = watch_paths(conn, &mut note);
+    tokio::pin!(work);
+    tokio::pin!(paths);
+    let mut watching = true;
+    let out = loop {
+        tokio::select! {
+            out = &mut work => break out,
+            () = &mut paths, if watching => watching = false,
+        }
+    };
+    if watching {
+        let _ = tokio::time::timeout(Duration::from_millis(500), &mut paths).await;
+    }
+    out
+}
+
 /// Reports path changes of `conn` until it closes (diagnostics for the
 /// direct-vs-relay question; see roadmap 4c).
 pub async fn watch_paths(conn: &Connection, mut note: impl FnMut(PathNote)) {

@@ -100,6 +100,9 @@ pub trait TransferObserver: Send + Sync {
     );
     /// No direct path for a while: the transfer crawls through the relay.
     fn on_slow_route(&self, incoming: bool);
+    /// A path of a transfer opened, was selected or closed (diagnostics:
+    /// address class, timing and byte counts only; `note` is for logs).
+    fn on_path(&self, incoming: bool, ms: u64, note: String);
     /// A transfer finished (diagnostics: route kind and duration, no addresses).
     fn on_route(&self, incoming: bool, ever_direct: bool, slow: bool, duration_ms: u64);
 }
@@ -243,9 +246,15 @@ impl Warpshot {
     ) -> T {
         let started = std::time::Instant::now();
         let obs = self.observer();
-        let (out, route) = net::watch_route(conn, net::SLOW_ROUTE_AFTER, work, || {
+        let routed = net::watch_route(conn, net::SLOW_ROUTE_AFTER, work, || {
             if let Some(o) = &obs {
                 o.on_slow_route(incoming);
+            }
+        });
+        let (out, route) = net::with_path_notes(conn, routed, |n| {
+            if let Some(o) = &obs {
+                let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+                o.on_path(incoming, ms, format!("{n:?}"));
             }
         })
         .await;

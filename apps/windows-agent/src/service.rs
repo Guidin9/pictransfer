@@ -507,6 +507,19 @@ impl Service {
         self.push_tray(false);
     }
 
+    /// Diagnostics for the direct-vs-relay question: path changes of transfer
+    /// `n` as `transfer.path` events (address class and byte counts only).
+    fn path_note(&self, n: u64, direction: &str, t0: Instant, note: &net::PathNote) {
+        self.emit(
+            "transfer.path",
+            json!({
+                "transfer": n.to_string(), "direction": direction,
+                "ms": u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
+                "note": format!("{note:?}"),
+            }),
+        );
+    }
+
     fn untrack(&self, n: u64) {
         lk(&self.active).remove(&n);
         self.push_tray(true);
@@ -974,11 +987,16 @@ impl Service {
             accept_large: false,
         };
         let conn = s.conn.clone();
-        let (items, route) = net::watch_route(
+        let t0 = Instant::now();
+        let (items, route) = net::with_path_notes(
             &conn,
-            net::SLOW_ROUTE_AFTER,
-            s.receive(&policy, |_| true),
-            || self.slow_route("in"),
+            net::watch_route(
+                &conn,
+                net::SLOW_ROUTE_AFTER,
+                s.receive(&policy, |_| true),
+                || self.slow_route("in"),
+            ),
+            |note| self.path_note(n, "in", t0, &note),
         )
         .await;
         self.count_route(route);
@@ -1249,11 +1267,16 @@ impl Service {
             }
             let sent: Vec<Item> = p.items.iter().map(|o| o.item.clone()).collect();
             let conn = s.conn.clone();
-            let (results, route) = net::watch_route(
+            let t0 = Instant::now();
+            let (results, route) = net::with_path_notes(
                 &conn,
-                net::SLOW_ROUTE_AFTER,
-                tokio::time::timeout(Duration::from_secs(3600), s.send_items(p.items)),
-                || self.slow_route("out"),
+                net::watch_route(
+                    &conn,
+                    net::SLOW_ROUTE_AFTER,
+                    tokio::time::timeout(Duration::from_secs(3600), s.send_items(p.items)),
+                    || self.slow_route("out"),
+                ),
+                |note| self.path_note(n, "out", t0, &note),
             )
             .await;
             self.count_route(route);
