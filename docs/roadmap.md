@@ -129,20 +129,33 @@ path, NAT, port mapping, endpoint, membership log).
    Windows hides them during full-screen apps, games and streams (the "Sent"
    toasts were in the notification center). Failures still also toast. The
    agent is now per-monitor DPI aware. Dev check: `--render-flyout DIR`.
-3. **Progress bar for sends** (phone share sheet first, PC too): bytes sent /
-   total and speed, so a 250 MB video shows it's moving. Needs per-chunk
-   progress from `net::xfer` → FFI callback → Kotlin; agent emits
-   `transfer.progress` (docs/ipc.md).
+3. ✓ **Progress bar for sends** (both directions, both platforms): the core
+   reports item-data progress and a smoothed rate at most 4×/s
+   (`Session::on_progress`) → FFI `TransferObserver.on_progress` → the share
+   card and the ongoing notification on Android; `transfer.started /
+   progress / done` on the PC (docs/ipc.md) → "Süren aktarımlar" in the UI
+   (bar, %, MB/s, time left) and the tray tooltip.
 4. ✓ **Tray icon has no logo** (shows blank in hidden icons): load a real
    icon resource in `tray.rs`, embed it in the exe.
-4b. **Active transfers view + cancel (both platforms):** a long send (video,
-   Android → PC) keeps running silently in the background after leaving the
-   share card, using data, with no way to see or stop it. Needed: an ongoing
-   notification on Android with progress and a Cancel action (run sends in a
-   foreground service, not the share activity); an "Active transfers" section
-   in the Windows UI and tray with progress and Cancel; cancellation in core
-   (`net::xfer` aborts the stream, closes with a cancel code, cleans temp
-   files on the receiver) exposed via FFI and `transfer.cancel` (docs/ipc.md).
+4b. ✓ **Active transfers view + cancel (both platforms):** cancel = close with
+   the new `CANCELLED` code (protocol §8.4, §8.8); the receiver deletes
+   partial files (also fixed: a `.part` file stayed behind when the
+   connection died between the last chunk and `ItemDone`); "cancelled" is
+   never reported as a failure. Android: sends run in `TransferService`
+   (foreground) — the share card shows progress with Cancel / "Continue in
+   background", the ongoing notification has Cancel ("Cancel all" for
+   several). PC: Cancel buttons in the UI, a Cancel item per transfer in the
+   tray menu, `transfer.list` / `transfer.cancel`. Tests: core e2e
+   (receiver/sender/early cancel, no files left), agent e2e (PC-side and
+   phone-side cancel, progress events; runs beside the real agent via the
+   debug-only `WARPSHOT_INSTANCE`). Known limit: a send cancelled while
+   waiting for the woken phone may still make the phone show "Couldn't
+   receive" when it answers late (same as an expired wait). Live check
+   (S21 FE + PC, 2026-10-10): PC → phone 30 MB complete with progress, 20 MB
+   cancelled from the PC (nothing saved, no error notice, service stopped),
+   the phone's notification showed progress with Cancel; phone → PC share
+   with the card and notification checked by the user. Agent idle after the
+   change: 0.83 MB private working set, 0 % CPU, 5 threads.
 4c. ✓ **LAN speed (2026-10-10):** measured (spikes.md "Phone ↔ PC routes"):
    on the same AP the direct path works at Wi-Fi speed (100 MB in 13 s, no
    firewall rule needed); the 27 min came from a repeater AP that breaks ARP
