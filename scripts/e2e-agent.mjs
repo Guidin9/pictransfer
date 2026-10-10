@@ -225,6 +225,25 @@ try {
   const after2 = fs.readdirSync(recvDir);
   check("phone cancel: no partial or new file", after2.length === before && !after2.some((f) => f.endsWith(".part")), after2.join(","));
 
+  // Cancel while the wake is still on its way: a server that accepts and never
+  // answers (the request timeout is 10 s); the send must end at once.
+  const hole = net.createServer((c) => c.on("error", () => {}));
+  await new Promise((r) => hole.listen(0, "127.0.0.1", r));
+  const t0 = Date.now();
+  const early = await new Promise((resolve) => {
+    const p = spawn(exe("examples/phone_sim.exe"), [phoneDir, `http://127.0.0.1:${hole.address().port}`, "send-text-cancel", me, "never sent"]);
+    let out = "";
+    p.stdout.on("data", (d) => (out += d));
+    p.stderr.on("data", (d) => (out += d));
+    p.on("exit", (code) => resolve({ ok: code === 0, out, ms: Date.now() - t0 }));
+  });
+  hole.close();
+  check(
+    "phone cancel while waking: Cancelled at once",
+    !early.ok && early.out.includes('"found":true') && early.out.includes("Cancelled") && early.ms < 4000,
+    `${early.ms} ms, ${early.out.trim().split("\n").at(-1)}`,
+  );
+
   const hist = await rpc("history.list", { limit: 10 });
   check("history has 3 incoming", hist.filter((h) => h.direction === "in").length === 3, hist.map((h) => h.kind).join(","));
   check("history shows the device name", hist.every((h) => h.peer === "Sim Phone" && h.peer_id === phoneId), hist.map((h) => h.peer).join(","));

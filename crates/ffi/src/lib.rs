@@ -186,6 +186,17 @@ pub struct Warpshot {
     rt: tokio::runtime::Runtime,
 }
 
+/// Longest wait for the iroh endpoint. A bind takes milliseconds plus at most
+/// [`net::RELAY_WAIT`] for the relay; once (in an emulator) it never returned,
+/// and every later transfer then waited behind the endpoint manager's lock.
+const BIND_TIMEOUT: Duration = Duration::from_secs(20);
+
+fn bind_timed_out() -> WarpError {
+    WarpError::Network {
+        code: warpshot_core::xfer::code::TIMEOUT,
+    }
+}
+
 /// Registers a transfer's cancel handle; unregisters it when dropped.
 struct Tracked {
     active: Arc<std::sync::Mutex<HashMap<u64, Cancel>>>,
@@ -504,7 +515,9 @@ impl Warpshot {
         ui: Arc<dyn PairConfirm>,
     ) -> Result<String, WarpError> {
         let qr = QrPayload::parse(qr_text.trim()).map_err(|_| WarpError::Invalid)?;
-        let (ep, _lease) = self.mgr.acquire().await?;
+        let (ep, _lease) = tokio::time::timeout(BIND_TIMEOUT, self.mgr.acquire())
+            .await
+            .map_err(|_| bind_timed_out())??;
         let mut dev = self.dev.lock().await;
         let client = &self.client;
         let paired = net::pair::scan(
@@ -576,7 +589,10 @@ impl Warpshot {
             }
             WakeAction::Connect { session, dial, .. } => {
                 let t = Tracked::new(&self.active, transfer);
-                let (ep, _lease) = self.mgr.acquire().await?;
+                let (ep, _lease) = tokio::select! {
+                    r = tokio::time::timeout(BIND_TIMEOUT, self.mgr.acquire()) => r.map_err(|_| bind_timed_out())??,
+                    () = t.cancel.cancelled() => return Err(WarpError::Cancelled),
+                };
                 let log = self
                     .dev
                     .lock()
@@ -668,7 +684,12 @@ impl Warpshot {
             return Err(WarpError::Invalid);
         }
         let t = Tracked::new(&self.active, transfer);
-        let (ep, _lease) = self.mgr.acquire().await?;
+        // Cancel works from the start, not only once the peer dials in: a slow
+        // bind or server call must not leave the send stuck at "Waiting".
+        let (ep, _lease) = tokio::select! {
+            r = tokio::time::timeout(BIND_TIMEOUT, self.mgr.acquire()) => r.map_err(|_| bind_timed_out())??,
+            () = t.cancel.cancelled() => return Err(WarpError::Cancelled),
+        };
         let (env, gid, log, session) = {
             let dev = self.dev.lock().await;
             let gid = dev.group_id().ok_or(WarpError::NotPaired)?;
@@ -680,13 +701,15 @@ impl Warpshot {
                 session,
             )
         };
-        let via = self
-            .client
-            .wake(&gid, &target, &env, 60)
-            .await
-            .map_err(|e| WarpError::Server {
+        let via = tokio::select! {
+            r = self.client.wake(&gid, &target, &env, 60) => r.map_err(|e| WarpError::Server {
                 code: e.to_string(),
-            })?;
+            })?,
+            () = t.cancel.cancelled() => {
+                self.pending.lock().await.take(&session, &target);
+                return Err(WarpError::Cancelled);
+            }
+        };
         if via == warpshot_core::client::Via::None {
             return Err(WarpError::Offline);
         }

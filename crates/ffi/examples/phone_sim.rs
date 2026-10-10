@@ -102,6 +102,17 @@ fn main() {
                 .send_files(a[3].clone(), vec![OutgoingFile { path: a[4].clone() }], 7)
                 .await
                 .map(|()| "sent".into()),
+            // Cancels 300 ms in, before the target could dial back.
+            "send-text-cancel" => {
+                let w3 = Arc::clone(&w2);
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    println!("{{\"found\":{}}}", w3.cancel_transfer(9));
+                });
+                w2.send_text(a[3].clone(), a[4].clone(), 9)
+                    .await
+                    .map(|()| "sent".into())
+            }
             "devices" => Ok(w2
                 .devices()
                 .await
