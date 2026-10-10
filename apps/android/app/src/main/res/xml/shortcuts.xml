@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Share target for the per-PC sharing shortcuts (Shortcuts.kt). -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <share-target android:targetClass="io.github.guidin9.warpshot.ShareActivity">
+        <data android:mimeType="*/*" />
+        <category android:name="io.github.guidin9.warpshot.category.SEND_TO_PC" />
+    </share-target>
+</shortcuts>

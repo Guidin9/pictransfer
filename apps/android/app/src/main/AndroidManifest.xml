@@ -25,6 +25,10 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Sharing shortcuts: each paired PC at the top of the share sheet. -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <activity
@@ -45,6 +49,28 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
+
+        <!-- Sends the clipboard (Quick Settings tile). Not exported: only our own
+             tile starts it; its own task, so it returns to the app it came from. -->
+        <activity
+            android:name=".ClipboardActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|uiMode"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Warpshot.Translucent" />
+
+        <!-- "Send to PC" Quick Settings tile; only the system UI can bind it. -->
+        <service
+            android:name=".SendTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_notify"
+            android:label="@string/share_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
         <!-- FCM data messages carry only the sealed wake envelope (protocol §6.5). -->
         <service

@@ -200,6 +200,7 @@ object Sender {
     suspend fun send(ctx: Context, id: Long, target: String, text: String?, paths: List<String>) {
         val core = Core.get(ctx)
         val peer = Transfers.state.value[id]?.peer ?: ctx.getString(R.string.your_pc)
+        val sizes = HistoryLog.sizes(paths) // read before the copies are deleted
         val outcome = try {
             if (core == null) throw WarpException.NotPaired()
             if (text != null) {
@@ -216,6 +217,7 @@ object Sender {
             Outgoing.delete(ctx, paths)
         }
         Transfers.finish(id, outcome)
+        if (outcome != Outcome.Cancelled) HistoryLog.sent(ctx, target, text, sizes, outcome == Outcome.Done)
         if (id !in Transfers.watched) {
             when (outcome) {
                 Outcome.Done -> Notifier.sent(ctx, peer)
@@ -336,24 +338,30 @@ object Receiver {
         Transfers.finish(id, Outcome.Done)
         if (items.isEmpty()) return // e.g. a group-change wake
         val clipboard = ctx.getSystemService(ClipboardManager::class.java)
+        val copy = Prefs.copyOnReceive(ctx)
+        val names = runCatching { core.devices() }.getOrNull().orEmpty().associate { it.id to it.name }
         for (item in items) {
+            val sender = names[item.peer] ?: from
             if (item.kind == KIND_TEXT) {
                 val text = item.text ?: continue
-                clipboard.setPrimaryClip(ClipData.newPlainText("Warpshot", text))
-                Notifier.text(ctx, from, text)
+                if (copy) clipboard.setPrimaryClip(ClipData.newPlainText("Warpshot", text))
+                Notifier.text(ctx, sender, text, copy)
+                HistoryLog.add(ctx, true, item.peer, Kind.TEXT, item.size.toLong(), true, text = text)
                 continue
             }
             val path = item.path ?: continue
             val file = File(path)
             val image = item.kind == KIND_IMAGE && item.mime.startsWith("image/")
-            val uri = Store.save(ctx, file, item.name.ifBlank { file.name }, item.mime, image)
+            val name = item.name.ifBlank { file.name }
+            val uri = Store.save(ctx, file, name, item.mime, image)
             file.delete()
+            HistoryLog.add(ctx, true, item.peer, if (image) Kind.IMAGE else Kind.FILE, item.size.toLong(), uri != null, name, uri?.toString())
             if (uri == null) {
                 Notifier.failed(ctx, ctx.getString(R.string.couldnt_save, item.name))
                 continue
             }
-            if (image) clipboard.setPrimaryClip(ClipData.newUri(ctx.contentResolver, "Warpshot", uri))
-            Notifier.saved(ctx, from, item.name, uri, item.mime, image)
+            if (image && copy) clipboard.setPrimaryClip(ClipData.newUri(ctx.contentResolver, "Warpshot", uri))
+            Notifier.saved(ctx, sender, item.name, uri, item.mime, image, copy)
         }
     }
 }
@@ -506,16 +514,16 @@ object Notifier {
             .setContentIntent(openApp(ctx)),
     )
 
-    fun text(ctx: Context, from: String, text: String) = post(
+    fun text(ctx: Context, from: String, text: String, copied: Boolean) = post(
         ctx,
         builder(ctx)
             .setContentTitle(ctx.getString(R.string.text_from, from))
-            .setContentText(ctx.getString(R.string.copied, text.take(120)))
+            .setContentText(if (copied) ctx.getString(R.string.copied, text.take(120)) else text.take(120))
             .setStyle(NotificationCompat.BigTextStyle().bigText(text.take(1000)))
             .setContentIntent(openApp(ctx)),
     )
 
-    fun saved(ctx: Context, from: String, name: String, uri: Uri, mime: String, image: Boolean) {
+    fun saved(ctx: Context, from: String, name: String, uri: Uri, mime: String, image: Boolean, copied: Boolean) {
         // Images open in the viewer; other files only reveal the Downloads list
         // (received files are never opened or run directly).
         val tap = if (image) {
@@ -531,7 +539,13 @@ object Notifier {
         )
         val b = builder(ctx)
             .setContentTitle(ctx.getString(if (image) R.string.image_from else R.string.file_from, from))
-            .setContentText(if (image) ctx.getString(R.string.image_saved) else ctx.getString(R.string.file_saved, name))
+            .setContentText(
+                when {
+                    !image -> ctx.getString(R.string.file_saved, name)
+                    copied -> ctx.getString(R.string.image_saved)
+                    else -> ctx.getString(R.string.image_saved_only)
+                },
+            )
             .setContentIntent(pi)
         if (image) preview(ctx, uri)?.let { b.setLargeIcon(it).setStyle(NotificationCompat.BigPictureStyle().bigPicture(it)) }
         post(ctx, b)

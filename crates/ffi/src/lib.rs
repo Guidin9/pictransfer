@@ -10,8 +10,9 @@ use tokio::sync::Mutex;
 use warpshot_core::{
     b64u,
     client::Client,
+    history::{self, Direction, Retention},
     keys::{EndpointId, KeyError, Keystore},
-    log::platform,
+    log::{Op, RecordBody, RemoveReason, platform, sign_record},
     net::{
         self, NetError, Relay,
         flow::{self, PendingSessions, WakeAction},
@@ -141,6 +142,37 @@ pub struct ReceivedItem {
     /// Path inside the inbox directory; Kotlin moves it to MediaStore.
     pub path: Option<String>,
     pub text: Option<String>,
+    /// The sending device's id (hex).
+    pub peer: String,
+}
+
+/// One history row (stored encrypted with the history key, like the agent's).
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct HistoryEntry {
+    pub id: i64,
+    pub ts: u64,
+    pub incoming: bool,
+    /// The other device's id (hex).
+    pub peer: String,
+    /// Its current name; `None` once it has left the group.
+    pub peer_name: Option<String>,
+    pub kind: u64,
+    pub size: u64,
+    pub ok: bool,
+    pub name: Option<String>,
+    /// Where the app saved a received item (a content URI).
+    pub uri: Option<String>,
+    pub text: Option<String>,
+}
+
+/// A device's presence as the server reports it: display only, never used
+/// for a security decision (threat model).
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct Presence {
+    pub id: String,
+    pub online: bool,
+    /// ms since the epoch, 60 s granularity.
+    pub last_seen: Option<u64>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -478,9 +510,227 @@ impl Warpshot {
             .await
             .map_err(|_| WarpError::Storage)?
     }
+
+    /// Adds a history row; keeps 30 days or 200 rows.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn history_add(
+        self: Arc<Self>,
+        incoming: bool,
+        peer: String,
+        kind: u64,
+        size: u64,
+        ok: bool,
+        name: Option<String>,
+        uri: Option<String>,
+        text: Option<String>,
+    ) -> Result<i64, WarpError> {
+        let this = Arc::clone(&self);
+        self.rt
+            .spawn(async move {
+                let peer = parse_id(&peer)?;
+                let dev = this.dev.lock().await;
+                let dir = if incoming {
+                    Direction::In
+                } else {
+                    Direction::Out
+                };
+                this.history(&dev)?
+                    .add(
+                        now_ms(),
+                        dir,
+                        &peer,
+                        kind,
+                        size,
+                        ok,
+                        name.as_deref(),
+                        uri.as_deref(),
+                        text.as_deref(),
+                        Retention::default(),
+                    )
+                    .map_err(|_| WarpError::Storage)
+            })
+            .await
+            .map_err(|_| WarpError::Storage)?
+    }
+
+    /// Newest first; `before_ts` pages further back.
+    pub async fn history_list(
+        self: Arc<Self>,
+        before_ts: Option<u64>,
+        limit: u32,
+    ) -> Result<Vec<HistoryEntry>, WarpError> {
+        let this = Arc::clone(&self);
+        self.rt
+            .spawn(async move {
+                let dev = this.dev.lock().await;
+                let rows = this
+                    .history(&dev)?
+                    .list(before_ts, limit.min(200))
+                    .map_err(|_| WarpError::Storage)?;
+                let members = dev.log.as_ref().map(|l| l.members());
+                Ok(rows
+                    .into_iter()
+                    .map(|e| HistoryEntry {
+                        id: e.id,
+                        ts: e.ts,
+                        incoming: e.direction == Direction::In,
+                        peer: hex(&e.peer.0),
+                        peer_name: members.and_then(|m| m.get(&e.peer)).map(|d| d.name.clone()),
+                        kind: e.kind,
+                        size: e.size,
+                        ok: e.ok,
+                        name: e.name,
+                        uri: e.path,
+                        text: e.text,
+                    })
+                    .collect())
+            })
+            .await
+            .map_err(|_| WarpError::Storage)?
+    }
+
+    pub async fn history_delete(self: Arc<Self>, id: i64) -> Result<(), WarpError> {
+        let this = Arc::clone(&self);
+        self.rt
+            .spawn(async move {
+                let dev = this.dev.lock().await;
+                this.history(&dev)?
+                    .delete(id)
+                    .map_err(|_| WarpError::Storage)
+            })
+            .await
+            .map_err(|_| WarpError::Storage)?
+    }
+
+    /// Deletes every history row.
+    pub async fn history_clear(self: Arc<Self>) -> Result<(), WarpError> {
+        let this = Arc::clone(&self);
+        self.rt
+            .spawn(async move {
+                let dev = this.dev.lock().await;
+                let h = this.history(&dev)?;
+                loop {
+                    let rows = h.list(None, 200).map_err(|_| WarpError::Storage)?;
+                    if rows.is_empty() {
+                        return Ok(());
+                    }
+                    for r in rows {
+                        h.delete(r.id).map_err(|_| WarpError::Storage)?;
+                    }
+                }
+            })
+            .await
+            .map_err(|_| WarpError::Storage)?
+    }
+
+    /// Online state and last-seen times of the group's devices (server view, display only).
+    pub async fn presence(self: Arc<Self>) -> Result<Vec<Presence>, WarpError> {
+        let this = Arc::clone(&self);
+        self.rt
+            .spawn(async move {
+                let gid = this
+                    .dev
+                    .lock()
+                    .await
+                    .group_id()
+                    .ok_or(WarpError::NotPaired)?;
+                let list = this
+                    .client
+                    .presence(&gid)
+                    .await
+                    .map_err(|e| WarpError::Server {
+                        code: e.to_string(),
+                    })?;
+                Ok(list
+                    .into_iter()
+                    .map(|p| Presence {
+                        id: hex(&p.id.0),
+                        online: p.online,
+                        last_seen: p.last_seen,
+                    })
+                    .collect())
+            })
+            .await
+            .map_err(|_| WarpError::Storage)?
+    }
+
+    /// Renames this device: an `update` record (§4; only a device can rename itself).
+    pub async fn rename(self: Arc<Self>, name: String) -> Result<(), WarpError> {
+        let this = Arc::clone(&self);
+        self.rt
+            .spawn(async move {
+                let name = name.trim().to_owned();
+                if name.is_empty() || name.len() > 64 {
+                    return Err(WarpError::Invalid);
+                }
+                let (me, mut info, paired) = {
+                    let dev = this.dev.lock().await;
+                    (dev.id(), dev.info(), dev.log.is_some())
+                };
+                info.name.clone_from(&name);
+                if paired {
+                    this.append(me, Op::Update(info)).await?;
+                }
+                let mut dev = this.dev.lock().await;
+                dev.name = name;
+                this.save(&dev).await
+            })
+            .await
+            .map_err(|_| WarpError::Storage)?
+    }
+
+    /// Removes a device from the group: a `remove` record signed by this device
+    /// (§4: any member may remove any member). The server then disconnects it.
+    pub async fn remove_device(
+        self: Arc<Self>,
+        id: String,
+        lost_or_stolen: bool,
+    ) -> Result<(), WarpError> {
+        let this = Arc::clone(&self);
+        self.rt
+            .spawn(async move {
+                let id = parse_id(&id)?;
+                let reason = if lost_or_stolen {
+                    RemoveReason::LostOrStolen
+                } else {
+                    RemoveReason::User
+                };
+                this.append(id, Op::Remove(reason)).await
+            })
+            .await
+            .map_err(|_| WarpError::Storage)?
+    }
 }
 
 impl Warpshot {
+    fn history(&self, dev: &Device) -> Result<history::Store, WarpError> {
+        history::Store::open(&self.dir.join("history.db"), &dev.keys.hk)
+            .map_err(|_| WarpError::Storage)
+    }
+
+    /// Signs and submits one membership record (§4) on top of the server's
+    /// current log; kept locally only if the server took it.
+    async fn append(&self, subject: EndpointId, op: Op) -> Result<(), WarpError> {
+        self.pull_log().await?;
+        let mut dev = self.dev.lock().await;
+        let mut log = dev.log.clone().ok_or(WarpError::NotPaired)?;
+        let (seq, prev) = log.next_position();
+        let body = RecordBody {
+            group_id: log.group_id(),
+            seq,
+            prev,
+            created_at: now_ms(),
+            subject,
+            op,
+        };
+        let raw = sign_record(&dev.keys.ik, &body);
+        log.append(&raw, now_ms())
+            .map_err(|_| WarpError::Rejected)?;
+        net::server::submit(&self.client, &[raw]).await?;
+        dev.log = Some(log);
+        self.save(&dev).await
+    }
+
     async fn device_id_impl(&self) -> String {
         hex(&self.dev.lock().await.id().0)
     }
@@ -632,6 +882,7 @@ impl Warpshot {
                         size: r.item.size,
                         path: r.path.map(|p| p.display().to_string()),
                         text: r.item.text,
+                        peer: hex(&sender.0),
                     })
                     .collect())
             }

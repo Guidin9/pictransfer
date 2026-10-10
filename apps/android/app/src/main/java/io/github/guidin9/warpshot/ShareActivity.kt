@@ -1,5 +1,6 @@
 package io.github.guidin9.warpshot
 
+import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.ImageDecoder
 import android.net.Uri
@@ -47,6 +48,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -99,7 +101,11 @@ class ShareActions(
  * progress. Leaving the sheet does not stop the send; the ongoing
  * notification keeps showing it with Cancel.
  */
-class ShareActivity : ComponentActivity() {
+open class ShareActivity : ComponentActivity() {
+    /** [ClipboardActivity]: send what is on the clipboard instead of a share intent. */
+    protected open val fromClipboard = false
+    private var clipRead = false
+
     private var stage by mutableStateOf<ShareStage>(ShareStage.Preparing)
     private var preview by mutableStateOf<SharePreview?>(null)
     private var pcs by mutableStateOf<List<DeviceEntry>>(emptyList())
@@ -133,6 +139,16 @@ class ShareActivity : ComponentActivity() {
                 }
                 val all by Transfers.state.collectAsState()
                 ModalBottomSheet(onDismissRequest = { dismissed() }, sheetState = sheet) {
+                    if (fromClipboard) {
+                        // Android lets an app read the clipboard only while one of its windows has focus.
+                        val focused = LocalWindowInfo.current.isWindowFocused
+                        LaunchedEffect(focused) {
+                            if (focused && !clipRead) {
+                                clipRead = true
+                                readClipboard()
+                            }
+                        }
+                    }
                     ShareSheet(
                         stage = stage,
                         preview = preview,
@@ -161,7 +177,20 @@ class ShareActivity : ComponentActivity() {
                 }
             }
         }
-        start(intent)
+        if (!fromClipboard) start(intent)
+    }
+
+    /** Text, or the first URI (e.g. a copied image), as if it had been shared. */
+    private fun readClipboard() {
+        val clip = runCatching { getSystemService(ClipboardManager::class.java)?.primaryClip }.getOrNull()
+        val item = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
+        val uri = item?.uri
+        val text = if (uri == null) item?.coerceToText(this)?.toString()?.takeIf { it.isNotEmpty() } else null
+        when {
+            uri != null -> start(Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uri))
+            text != null -> start(Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_TEXT, text))
+            else -> stage = ShareStage.Ended(false, getString(R.string.clipboard_nothing))
+        }
     }
 
     /** A new share while this one is still on screen (singleTop or reused task). */
@@ -222,7 +251,9 @@ class ShareActivity : ComponentActivity() {
             return
         }
         pcs = list
-        target = Core.target(this, list)?.id
+        // A share through a PC's sharing shortcut goes straight to that PC.
+        val shortcut = Shortcuts.target(intent)?.takeIf { id -> list.any { it.id == id } }
+        target = shortcut ?: Core.target(this, list)?.id
         val text = intent.getStringExtra(Intent.EXTRA_TEXT)
         val uris = uris(intent)
         var label = ""
@@ -249,7 +280,7 @@ class ShareActivity : ComponentActivity() {
                 return
             }
         }
-        if (list.size > 1) {
+        if (list.size > 1 && shortcut == null) {
             stage = ShareStage.Choose
             CompletableDeferred<Unit>().also { chosen = it }.await()
         }

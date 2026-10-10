@@ -92,6 +92,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.warpshot_ffi.DeviceEntry
+import uniffi.warpshot_ffi.HistoryEntry
+import uniffi.warpshot_ffi.Presence
 
 class MainActivity : ComponentActivity() {
     /** Sends started on this screen; while it is visible it reports their results itself. */
@@ -126,6 +128,10 @@ class HomeActions(
     val cancel: (Long) -> Unit = {},
     val pairAnother: () -> Unit = {},
     val enableNotifications: () -> Unit = {},
+    val openHistory: () -> Unit = {},
+    val openDevices: () -> Unit = {},
+    val openSettings: () -> Unit = {},
+    val openEntry: (HistoryEntry) -> Unit = {},
 )
 
 @Composable
@@ -140,6 +146,10 @@ fun MainScreen(mine: MutableSet<Long>) {
     var draft by rememberSaveable { mutableStateOf("") }
     var preparing by remember { mutableIntStateOf(0) }
     var notificationsOn by remember { mutableStateOf(true) }
+    var screen by rememberSaveable { mutableStateOf("home") }
+    var presence by remember { mutableStateOf<Map<String, Presence>>(emptyMap()) }
+    var recent by remember { mutableStateOf<List<HistoryEntry>>(emptyList()) }
+    val historyTick by HistoryLog.changed.collectAsState()
     val pairing by Pairing.state.collectAsState()
     val transfers by Transfers.state.collectAsState()
     val focus = LocalFocusManager.current
@@ -155,6 +165,7 @@ fun MainScreen(mine: MutableSet<Long>) {
         if (runCatching { core.sync() }.isSuccess) {
             devices = runCatching { core.devices() }.getOrDefault(devices.orEmpty())
         }
+        presence = runCatching { core.presence() }.getOrNull()?.associateBy { it.id } ?: presence
     }
 
     val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -192,6 +203,13 @@ fun MainScreen(mine: MutableSet<Long>) {
     val paired = pcs.isNotEmpty()
     LaunchedEffect(paired) {
         if (paired) Push.ensureRegistered(ctx)
+    }
+    // One share-sheet shortcut per paired PC; none once all are gone.
+    LaunchedEffect(pcs) {
+        if (devices != null) withContext(Dispatchers.IO) { Shortcuts.sync(ctx, pcs) }
+    }
+    LaunchedEffect(historyTick, paired) {
+        recent = if (paired) HistoryUi.load(ctx, 5) else emptyList()
     }
 
     // Pairing results: a new PC appears; failures show where the user looks.
@@ -304,11 +322,25 @@ fun MainScreen(mine: MutableSet<Long>) {
         cancel = { TransferService.cancel(ctx, it) },
         pairAnother = { scan() },
         enableNotifications = { enableNotifications() },
+        openHistory = { screen = "history" },
+        openDevices = { screen = "devices" },
+        openSettings = { screen = "settings" },
+        openEntry = { e -> HistoryUi.open(ctx, e)?.let { m -> scope.launch { snackbar.showSnackbar(m) } } },
     )
 
     when {
         devices == null -> {}
         pc == null -> OnboardingScreen(pairing, onScan = { scan() }, onAnswer = Pairing::answer)
+        screen == "history" -> HistoryScreen(onBack = { screen = "home" })
+        screen == "settings" -> SettingsScreen(onBack = { screen = "home" })
+        screen == "devices" -> {
+            DevicesScreen(
+                onBack = { screen = "home" },
+                onPairAnother = { scan() },
+                onChanged = { scope.launch { refresh() } },
+            )
+            (pairing as? PairState.Confirm)?.let { SasDialog(it, Pairing::answer) }
+        }
         else -> {
             HomeScreen(
                 pcs = pcs,
@@ -321,6 +353,8 @@ fun MainScreen(mine: MutableSet<Long>) {
                 pairing = pairing,
                 snackbar = snackbar,
                 actions = actions,
+                status = presence[pc.id],
+                recent = recent,
             )
             (pairing as? PairState.Confirm)?.let { SasDialog(it, Pairing::answer) }
         }
@@ -498,6 +532,8 @@ fun HomeScreen(
     pairing: PairState,
     snackbar: SnackbarHostState,
     actions: HomeActions,
+    status: Presence? = null,
+    recent: List<HistoryEntry> = emptyList(),
 ) {
     // No top bar: the app's name and logo only took space (user, 2026-10-10).
     Scaffold(
@@ -519,7 +555,7 @@ fun HomeScreen(
             if (pairing == PairState.Working || pairing is PairState.Confirm) {
                 item { Section { PairingProgress() } }
             }
-            item { SendCard(pcs, target, draft, onDraft, preparing, actions) }
+            item { SendCard(pcs, target, status, draft, onDraft, preparing, actions) }
             if (transfers.isNotEmpty() || preparing) {
                 item {
                     Section {
@@ -535,20 +571,11 @@ fun HomeScreen(
                     }
                 }
             }
+            if (recent.isNotEmpty()) item { RecentSection(recent, actions.openEntry, actions.openHistory) }
             if (!notificationsOn) item { NotificationsCard(actions.enableNotifications) }
-            item { TipsCard() }
+            // Tips until something has been sent or received.
+            if (recent.isEmpty()) item { TipsCard() }
         }
-    }
-}
-
-/** A rounded surface-container card with the home screen's spacing. */
-@Composable
-private fun Section(content: @Composable () -> Unit) {
-    Card(
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-    ) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) { content() }
     }
 }
 
@@ -556,6 +583,7 @@ private fun Section(content: @Composable () -> Unit) {
 private fun SendCard(
     pcs: List<DeviceEntry>,
     target: DeviceEntry,
+    status: Presence?,
     draft: String,
     onDraft: (String) -> Unit,
     preparing: Boolean,
@@ -590,13 +618,15 @@ private fun SendCard(
                 )
                 Spacer(Modifier.width(4.dp))
                 Text(
-                    stringResource(R.string.e2e),
+                    listOf(stringResource(R.string.e2e), presenceText(status)).filter { it.isNotEmpty() }.joinToString(" · "),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
-        DeviceMenu(actions.pairAnother)
+        DeviceMenu(actions)
     }
     if (pcs.size > 1) {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -641,9 +671,9 @@ private fun SendCard(
     )
 }
 
-/** "⋮" on the target card: pairing another PC. */
+/** "⋮" on the target card: devices, history, settings, pairing another PC. */
 @Composable
-private fun DeviceMenu(onPairAnother: () -> Unit) {
+private fun DeviceMenu(actions: HomeActions) {
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }) {
@@ -654,14 +684,21 @@ private fun DeviceMenu(onPairAnother: () -> Unit) {
             )
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.pair_another)) },
-                leadingIcon = { Icon(painterResource(R.drawable.ic_add), contentDescription = null) },
-                onClick = {
-                    open = false
-                    onPairAnother()
-                },
-            )
+            listOf(
+                Triple(R.string.menu_devices, R.drawable.ic_computer, actions.openDevices),
+                Triple(R.string.menu_history, R.drawable.ic_history, actions.openHistory),
+                Triple(R.string.menu_settings, R.drawable.ic_settings, actions.openSettings),
+                Triple(R.string.pair_another, R.drawable.ic_add, actions.pairAnother),
+            ).forEach { (label, icon, action) ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(label)) },
+                    leadingIcon = { Icon(painterResource(icon), contentDescription = null) },
+                    onClick = {
+                        open = false
+                        action()
+                    },
+                )
+            }
         }
     }
 }

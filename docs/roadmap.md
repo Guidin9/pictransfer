@@ -147,6 +147,19 @@ path, NAT, port mapping, endpoint, membership log).
    the photo picker (arrived as `IMG_20261010_184819.png`), the share sheet
    (text sent and the sheet closed within 2 s).
    Open: received partial files in `cache/inbox` after a killed process.
+1b. ✓ **Android completeness (2026-10-10, user's pick):** history (home
+   "Recent" + full list; copy again, open, delete, clear), a Devices screen
+   (PC online state, rename this phone, remove a device), sharing shortcuts
+   per PC, a "Send to PC" Quick Settings tile (sends the clipboard) and a
+   Settings screen (clipboard on receive, history on/off, notifications,
+   battery optimization, tile, about). Received items now name their real
+   sender (FFI `ReceivedItem.peer`), which also fixes the sender's name with
+   several PCs. Live check on the S21 FE: history filled from both
+   directions, presence "Online", all four screens, clear history; the
+   shortcut is registered (`dumpsys shortcut`). Not checked live: removing
+   a device and renaming (would change the real group; same signed-append
+   path as the agent's), the tile (needs adding to the panel by hand), the
+   share-sheet shortcut row.
 2. ✓ **Hotkey feedback on the PC:** an on-screen flyout above the taskbar
    (`osd.rs`) says "Sending to …" the moment the hotkey is pressed, then
    "Sent to …" or "Not sent: …"; it never takes focus, lets clicks through
