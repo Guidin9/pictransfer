@@ -30,7 +30,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -500,18 +499,19 @@ fun HomeScreen(
     snackbar: SnackbarHostState,
     actions: HomeActions,
 ) {
+    // No top bar: the app's name and logo only took space (user, 2026-10-10).
     Scaffold(
-        topBar = { HomeTopBar(actions.pairAnother) },
         snackbarHost = { SnackbarHost(snackbar) },
         // With the keyboard: the list ends and the snackbar sits above it.
         contentWindowInsets = WindowInsets.safeDrawing,
     ) { pad ->
         LazyColumn(
-            Modifier.fillMaxSize(),
+            // Clipped below the status bar, so nothing scrolls under its icons.
+            Modifier.fillMaxSize().padding(top = pad.calculateTopPadding()),
             contentPadding = PaddingValues(
                 start = 16.dp,
                 end = 16.dp,
-                top = pad.calculateTopPadding() + 4.dp,
+                top = 12.dp,
                 bottom = pad.calculateBottomPadding() + 24.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -537,39 +537,6 @@ fun HomeScreen(
             }
             if (!notificationsOn) item { NotificationsCard(actions.enableNotifications) }
             item { TipsCard() }
-        }
-    }
-}
-
-@Composable
-private fun HomeTopBar(onPairAnother: () -> Unit) {
-    var menu by remember { mutableStateOf(false) }
-    Row(
-        Modifier.fillMaxWidth().statusBarsPadding().padding(start = 20.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        AppMark(32.dp)
-        Spacer(Modifier.width(12.dp))
-        Text(
-            stringResource(R.string.app_name),
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f),
-        )
-        Box {
-            IconButton(onClick = { menu = true }) {
-                Icon(painterResource(R.drawable.ic_more_vert), contentDescription = stringResource(R.string.more))
-            }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(
-                    text = { Text(stringResource(R.string.pair_another)) },
-                    leadingIcon = { Icon(painterResource(R.drawable.ic_add), contentDescription = null) },
-                    onClick = {
-                        menu = false
-                        onPairAnother()
-                    },
-                )
-            }
         }
     }
 }
@@ -629,6 +596,7 @@ private fun SendCard(
                 )
             }
         }
+        DeviceMenu(actions.pairAnother)
     }
     if (pcs.size > 1) {
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -671,6 +639,31 @@ private fun SendCard(
             }
         },
     )
+}
+
+/** "⋮" on the target card: pairing another PC. */
+@Composable
+private fun DeviceMenu(onPairAnother: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(
+                painterResource(R.drawable.ic_more_vert),
+                contentDescription = stringResource(R.string.more),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.pair_another)) },
+                leadingIcon = { Icon(painterResource(R.drawable.ic_add), contentDescription = null) },
+                onClick = {
+                    open = false
+                    onPairAnother()
+                },
+            )
+        }
+    }
 }
 
 @Composable
