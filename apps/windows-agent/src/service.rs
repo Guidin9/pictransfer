@@ -1644,14 +1644,27 @@ impl Service {
                 let rows = h
                     .list(before, u32::try_from(limit).unwrap_or(50))
                     .map_err(|_| fail("storage"))?;
+                // Show the device's current name; a device that has left the
+                // group has none any more, so it gets a short id.
+                let names: HashMap<EndpointId, String> = self
+                    .others()
+                    .await
+                    .into_iter()
+                    .map(|(id, (name, _))| (id, name))
+                    .collect();
                 Ok(Value::Array(
                     rows.into_iter()
                         .map(|e| {
+                            let peer = names.get(&e.peer).cloned().unwrap_or_else(|| {
+                                let id = hex(&e.peer.0);
+                                format!("{}…", id.get(..8).unwrap_or(&id))
+                            });
                             json!({
                                 "id": e.id.to_string(),
                                 "ts": e.ts,
                                 "direction": if e.direction == Direction::In { "in" } else { "out" },
-                                "peer": hex(&e.peer.0),
+                                "peer": peer,
+                                "peer_id": hex(&e.peer.0),
                                 "kind": match e.kind { wx::kind::TEXT => "text", wx::kind::IMAGE => "image", _ => "file" },
                                 "name": e.name.or(e.text.map(|t| t.chars().take(80).collect())),
                                 "size": e.size,

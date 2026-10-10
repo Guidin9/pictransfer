@@ -227,6 +227,7 @@ try {
 
   const hist = await rpc("history.list", { limit: 10 });
   check("history has 3 incoming", hist.filter((h) => h.direction === "in").length === 3, hist.map((h) => h.kind).join(","));
+  check("history shows the device name", hist.every((h) => h.peer === "Sim Phone" && h.peer_id === phoneId), hist.map((h) => h.peer).join(","));
 
   // PC → phone: the simulated phone has no WebSocket and no push token → offline.
   const tdone = waitEvent("transfer.done");

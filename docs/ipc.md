@@ -33,7 +33,7 @@ The agent owns all state, keys and network access; the UI holds none of them.
 | `settings.get` | – | `Settings` (below) |
 | `settings.set` | partial `Settings` | `Settings` |
 | `hotkey.check` | `{hotkey: "Ctrl+Alt+Shift+S"}` | `{valid: bool, conflict: bool, produces?: string}` (AltGr check on the active layout) |
-| `history.list` | `{before?: ts, limit?: uint ≤ 200}` | `[{id, ts, direction: "in" \| "out", peer, kind: "text" \| "image" \| "file", name?, size, path?, ok}]` |
+| `history.list` | `{before?: ts, limit?: uint ≤ 200}` | `[{id, ts, direction: "in" \| "out", peer, peer_id, kind: "text" \| "image" \| "file", name?, size, path?, ok}]` (`peer`: the device's current name, or a short id once it has left the group) |
 | `history.reveal` | `{id}` | `{}` — shows the file selected in Explorer. Received files are **never** opened or executed by the agent. |
 | `history.delete` | `{id}` | `{}` |
 | `send.files` | `{paths: [string], target?: id}` | `{transfer: id}` |

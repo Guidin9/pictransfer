@@ -336,6 +336,8 @@ p {
   font-size: 12px;
   line-height: 16px;
   margin-top: 2px;
+  /* A long word (device name, id) wraps instead of running under the buttons. */
+  overflow-wrap: anywhere;
 }
 
 .row-control {

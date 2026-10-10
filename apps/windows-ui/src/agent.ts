@@ -38,7 +38,9 @@ export interface HistoryItem {
   id: string;
   ts: number;
   direction: "in" | "out";
+  /** The device's current name (a short id once it has left the group). */
   peer: string;
+  peer_id: string;
   kind: "text" | "image" | "file";
   name?: string;
   size: number;
