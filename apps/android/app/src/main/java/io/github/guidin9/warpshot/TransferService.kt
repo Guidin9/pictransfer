@@ -192,7 +192,7 @@ class TransferService : Service() {
 object Sender {
     suspend fun send(ctx: Context, id: Long, target: String, text: String?, paths: List<String>) {
         val core = Core.get(ctx)
-        val peer = Transfers.state.value[id]?.peer ?: "your PC"
+        val peer = Transfers.state.value[id]?.peer ?: ctx.getString(R.string.your_pc)
         val outcome = try {
             if (core == null) throw WarpException.NotPaired()
             if (text != null) {
@@ -204,7 +204,7 @@ object Sender {
         } catch (_: WarpException.Cancelled) {
             Outcome.Cancelled
         } catch (e: Exception) {
-            Outcome.Failed(errorText(e))
+            Outcome.Failed(errorText(ctx, e))
         } finally {
             Outgoing.delete(ctx, paths)
         }
@@ -244,19 +244,20 @@ object Receiver {
     suspend fun handle(ctx: Context, env: String, id: Long) {
         val core = Core.get(ctx) ?: return
         val inbox = File(ctx.cacheDir, "inbox").apply { mkdirs() }
-        val from = runCatching { core.devices().firstOrNull { !it.me }?.name }.getOrNull() ?: "your PC"
+        val from = runCatching { core.devices().firstOrNull { !it.me }?.name }.getOrNull()
+            ?: ctx.getString(R.string.your_pc)
         Transfers.start(id, incoming = true, peer = from, label = "")
         val items = try {
             core.handleWake(env, inbox.path, id.toULong())
         } catch (e: WarpException.Rejected) {
-            Transfers.finish(id, Outcome.Failed(errorText(e)))
+            Transfers.finish(id, Outcome.Failed(errorText(ctx, e)))
             return // not a wake we accept (replay, stale, not a member): stay silent
         } catch (_: WarpException.Cancelled) {
             Transfers.finish(id, Outcome.Cancelled)
             return // cancelled here or on the PC: nothing to report
         } catch (e: Exception) {
-            Transfers.finish(id, Outcome.Failed(errorText(e)))
-            Notifier.failed(ctx, errorText(e))
+            Transfers.finish(id, Outcome.Failed(errorText(ctx, e)))
+            Notifier.failed(ctx, errorText(ctx, e))
             return
         }
         Transfers.finish(id, Outcome.Done)
@@ -275,7 +276,7 @@ object Receiver {
             val uri = Store.save(ctx, file, item.name.ifBlank { file.name }, item.mime, image)
             file.delete()
             if (uri == null) {
-                Notifier.failed(ctx, "Couldn't save ${item.name}.")
+                Notifier.failed(ctx, ctx.getString(R.string.couldnt_save, item.name))
                 continue
             }
             if (image) clipboard.setPrimaryClip(ClipData.newUri(ctx.contentResolver, "Warpshot", uri))
@@ -286,12 +287,14 @@ object Receiver {
 
 /** "42 % · 12 MB / 250 MB · 8.1 MB/s" for a running transfer. */
 fun progressLine(ctx: Context, t: TransferState): String {
-    if (!t.running || t.total <= 0) return if (t.incoming) "Connecting…" else "Waiting for ${t.peer}…"
+    if (!t.running || t.total <= 0) {
+        return if (t.incoming) ctx.getString(R.string.connecting) else ctx.getString(R.string.waiting_for, t.peer)
+    }
     val parts = mutableListOf(
-        "${(t.fraction * 100).toInt()} %",
+        ctx.getString(R.string.percent, (t.fraction * 100).toInt()),
         "${Formatter.formatShortFileSize(ctx, t.done)} / ${Formatter.formatShortFileSize(ctx, t.total)}",
     )
-    if (t.bytesPerSec > 0) parts += "${Formatter.formatShortFileSize(ctx, t.bytesPerSec)}/s"
+    if (t.bytesPerSec > 0) parts += ctx.getString(R.string.rate, Formatter.formatShortFileSize(ctx, t.bytesPerSec))
     return parts.joinToString(" · ")
 }
 
@@ -330,20 +333,25 @@ object Notifier {
     const val PROGRESS_ID = 1
     private const val SLOW_ID = 2
     private const val CH_RECEIVED = "received"
+    private const val CH_SENT = "sent"
     private const val CH_PROGRESS = "progress"
     private const val CH_CONNECTION = "connection"
     private val nextId = AtomicInteger(100)
 
     fun channels(ctx: Context) {
         val nm = ctx.getSystemService(NotificationManager::class.java)
+        // Re-created on every call, so a language change renames the channels too.
         nm.createNotificationChannel(
-            NotificationChannel(CH_RECEIVED, "Received from your PC", NotificationManager.IMPORTANCE_DEFAULT),
+            NotificationChannel(CH_RECEIVED, ctx.getString(R.string.channel_received), NotificationManager.IMPORTANCE_DEFAULT),
         )
         nm.createNotificationChannel(
-            NotificationChannel(CH_PROGRESS, "Transfers in progress", NotificationManager.IMPORTANCE_LOW),
+            NotificationChannel(CH_SENT, ctx.getString(R.string.channel_sent), NotificationManager.IMPORTANCE_DEFAULT),
         )
         nm.createNotificationChannel(
-            NotificationChannel(CH_CONNECTION, "Connection notices", NotificationManager.IMPORTANCE_DEFAULT),
+            NotificationChannel(CH_PROGRESS, ctx.getString(R.string.channel_progress), NotificationManager.IMPORTANCE_LOW),
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(CH_CONNECTION, ctx.getString(R.string.channel_connection), NotificationManager.IMPORTANCE_DEFAULT),
         )
     }
 
@@ -353,14 +361,9 @@ object Notifier {
         NotificationCompat.Builder(ctx, CH_CONNECTION)
             .setSmallIcon(R.drawable.ic_notify)
             .setAutoCancel(true)
-            .setContentTitle("Slow connection")
-            .setContentText("No direct connection to your PC; this transfer goes through the relay.")
-            .setStyle(
-                NotificationCompat.BigTextStyle().bigText(
-                    "No direct connection to your PC, so this transfer goes through the relay and may " +
-                        "take a while. Being on the same Wi-Fi network as the PC (not a repeater) is fastest.",
-                ),
-            ),
+            .setContentTitle(ctx.getString(R.string.slow_title))
+            .setContentText(ctx.getString(R.string.slow_text))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(ctx.getString(R.string.slow_big))),
         SLOW_ID,
     )
 
@@ -378,21 +381,29 @@ object Notifier {
             .setContentIntent(openApp(ctx))
         val one = list.singleOrNull()
         when {
-            list.isEmpty() -> b.setContentTitle("Connecting to your PC…").setProgress(0, 0, true)
+            list.isEmpty() -> b.setContentTitle(ctx.getString(R.string.connecting_pc)).setProgress(0, 0, true)
             one != null -> {
-                val what = if (one.incoming) "Receiving from ${one.peer}" else "Sending to ${one.peer}"
+                val what = if (one.incoming) {
+                    ctx.getString(R.string.receiving_from, one.peer)
+                } else {
+                    ctx.getString(R.string.sending_to, one.peer)
+                }
                 b.setContentTitle(if (one.label.isEmpty()) what else "$what: ${one.label}")
                     .setContentText(progressLine(ctx, one))
                     .setProgress(1000, (one.fraction * 1000).toInt(), !one.running || one.total <= 0)
-                    .addAction(0, "Cancel", TransferService.cancelIntent(ctx, one.id))
+                    .addAction(0, ctx.getString(R.string.cancel), TransferService.cancelIntent(ctx, one.id))
             }
             else -> {
                 val total = list.sumOf { it.total }
                 val done = list.sumOf { it.done }
-                b.setContentTitle("${list.size} transfers")
-                    .setContentText(list.joinToString(", ") { if (it.incoming) "from ${it.peer}" else "to ${it.peer}" })
+                b.setContentTitle(ctx.getString(R.string.n_transfers, list.size))
+                    .setContentText(
+                        list.joinToString(", ") {
+                            ctx.getString(if (it.incoming) R.string.from_peer else R.string.to_peer, it.peer)
+                        },
+                    )
                     .setProgress(1000, if (total > 0) (done * 1000 / total).toInt() else 0, total <= 0)
-                    .addAction(0, "Cancel all", TransferService.cancelIntent(ctx, TransferService.ALL))
+                    .addAction(0, ctx.getString(R.string.cancel_all), TransferService.cancelIntent(ctx, TransferService.ALL))
             }
         }
         return b.build()
@@ -411,19 +422,22 @@ object Notifier {
     /** A send finished while no screen showed it. */
     fun sent(ctx: Context, peer: String) = post(
         ctx,
-        builder(ctx).setContentTitle("Sent to $peer").setContentIntent(openApp(ctx)),
+        builder(ctx, CH_SENT).setContentTitle(ctx.getString(R.string.sent_title, peer)).setContentIntent(openApp(ctx)),
     )
 
     fun notSent(ctx: Context, peer: String, message: String) = post(
         ctx,
-        builder(ctx).setContentTitle("Not sent to $peer").setContentText(message).setContentIntent(openApp(ctx)),
+        builder(ctx, CH_SENT)
+            .setContentTitle(ctx.getString(R.string.not_sent_title, peer))
+            .setContentText(message)
+            .setContentIntent(openApp(ctx)),
     )
 
     fun text(ctx: Context, from: String, text: String) = post(
         ctx,
         builder(ctx)
-            .setContentTitle("Text from $from")
-            .setContentText("Copied: ${text.take(120)}")
+            .setContentTitle(ctx.getString(R.string.text_from, from))
+            .setContentText(ctx.getString(R.string.copied, text.take(120)))
             .setStyle(NotificationCompat.BigTextStyle().bigText(text.take(1000)))
             .setContentIntent(openApp(ctx)),
     )
@@ -443,8 +457,8 @@ object Notifier {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val b = builder(ctx)
-            .setContentTitle(if (image) "Image from $from" else "File from $from")
-            .setContentText(if (image) "Copied and saved to Pictures/Warpshot" else "$name saved to Download/Warpshot")
+            .setContentTitle(ctx.getString(if (image) R.string.image_from else R.string.file_from, from))
+            .setContentText(if (image) ctx.getString(R.string.image_saved) else ctx.getString(R.string.file_saved, name))
             .setContentIntent(pi)
         if (image) preview(ctx, uri)?.let { b.setLargeIcon(it).setStyle(NotificationCompat.BigPictureStyle().bigPicture(it)) }
         post(ctx, b)
@@ -452,11 +466,11 @@ object Notifier {
 
     fun failed(ctx: Context, message: String) = post(
         ctx,
-        builder(ctx).setContentTitle("Couldn't receive from your PC").setContentText(message).setContentIntent(openApp(ctx)),
+        builder(ctx).setContentTitle(ctx.getString(R.string.receive_failed)).setContentText(message).setContentIntent(openApp(ctx)),
     )
 
-    private fun builder(ctx: Context) =
-        NotificationCompat.Builder(ctx, CH_RECEIVED).setSmallIcon(R.drawable.ic_notify).setAutoCancel(true)
+    private fun builder(ctx: Context, channel: String = CH_RECEIVED) =
+        NotificationCompat.Builder(ctx, channel).setSmallIcon(R.drawable.ic_notify).setAutoCancel(true)
 
     private fun openApp(ctx: Context): PendingIntent = PendingIntent.getActivity(
         ctx,

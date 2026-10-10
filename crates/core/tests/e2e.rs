@@ -656,6 +656,68 @@ async fn progress_and_cancel() {
     assert!(r.is_err());
     assert!(dir_is_empty(&dir));
 
+    // --- 5. Cancel after the first of two files is saved: the saved file
+    // stays and is reported by `receive_keep`; the second leaves nothing.
+    let dir = tmpdir("cancel-keep");
+    let cancel = Cancel::new();
+    let mut first = big_item(1, 50_000);
+    first.item.name = "first.bin".into();
+    let items = vec![first, big_item(2, 64 << 20)];
+    let watcher = {
+        let (dir, cancel) = (dir.clone(), cancel.clone());
+        async move {
+            // The first file is final and the second is streaming.
+            let wait = async {
+                loop {
+                    let names: Vec<String> = std::fs::read_dir(&dir)
+                        .unwrap()
+                        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                        .collect();
+                    if names.iter().any(|n| n == "first.bin")
+                        && names.iter().any(|n| n.ends_with(".part"))
+                    {
+                        return;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                }
+            };
+            tokio::time::timeout(std::time::Duration::from_secs(20), wait)
+                .await
+                .expect("second stream never started");
+            cancel.cancel();
+        }
+    };
+    let policy = Policy {
+        dir: dir.clone(),
+        max_size: 1 << 30,
+        accept_large: false,
+    };
+    let ((kept, r), s, ()) = tokio::join!(
+        async {
+            let conn = accept_conn(&ep_pc).await;
+            let mut s = nx::accept(&ep_pc, conn, &pc_log).await.unwrap();
+            s.cancel_with(&cancel);
+            s.receive_keep(&policy, |_| true).await
+        },
+        async {
+            nx::dial(&ep_phone, &phone_log, &pc.id(), &pc_addr, [0; 16])
+                .await
+                .unwrap()
+                .send_items(items)
+                .await
+        },
+        watcher
+    );
+    assert_eq!(r.unwrap_err(), net::NetError::Cancelled);
+    assert_eq!(s.unwrap_err(), net::NetError::Cancelled);
+    assert_eq!(kept.len(), 1, "the saved file is reported");
+    assert_eq!(kept[0].item.name, "first.bin");
+    let names: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, vec!["first.bin".to_string()], "only the saved file");
+
     ep_pc.close().await;
     ep_phone.close().await;
 }

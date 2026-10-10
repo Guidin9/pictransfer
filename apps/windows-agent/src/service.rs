@@ -40,7 +40,8 @@ use crate::{
     clipboard::ClipContent,
     dpapi::Dpapi,
     hotkey::{self, Hotkey},
-    osd,
+    i18n::pick,
+    l10n, osd,
     pipe::{self, RpcError},
     power,
     tray::{DeviceItem, MenuModel, TransferItem},
@@ -314,17 +315,17 @@ impl Active {
 
     fn tray_text(&self) -> String {
         let what = match (self.direction, self.label.as_str()) {
-            ("in", _) => format!("Receiving from {}", self.peer),
-            (_, "") => format!("Sending to {}", self.peer),
-            (_, l) => format!("Sending {l} to {}", self.peer),
+            ("in", _) => l10n!("Receiving from {}", "{} cihazından alınıyor", self.peer),
+            (_, "") => l10n!("Sending to {}", "{} cihazına gönderiliyor", self.peer),
+            (_, l) => l10n!("Sending {} to {}", "{} → {}", l, self.peer),
         };
         match self.progress {
             Some(p) if p.total > 0 => {
                 let pct = p.done.saturating_mul(100).checked_div(p.total).unwrap_or(0);
-                format!("{what}: {pct} %")
+                l10n!("{}: {} %", "{}: %{}", what, pct)
             }
             Some(_) => what,
-            None => format!("{what} (waiting)"),
+            None => l10n!("{} (waiting)", "{} (bekleniyor)", what),
         }
     }
 }
@@ -343,7 +344,7 @@ fn items_label(items: &[OutItem]) -> String {
         .unwrap_or_default();
     match items.len() {
         0 | 1 => first,
-        n if first.is_empty() => format!("{n} items"),
+        n if first.is_empty() => l10n!("{} items", "{} öğe", n),
         n => format!("{first} +{}", n.saturating_sub(1)),
     }
 }
@@ -447,9 +448,16 @@ impl Service {
                     });
                 }
                 Err(code) => {
-                    let body = format!("The clipboard can't be sent ({code}).");
-                    self.flyout(&format!("Not sent: {code}"), osd::Tone::Error);
-                    self.toast("Nothing sent", &body);
+                    let body = l10n!(
+                        "The clipboard can't be sent ({}).",
+                        "Pano gönderilemiyor ({}).",
+                        code
+                    );
+                    self.flyout(
+                        &l10n!("Not sent: {}", "Gönderilmedi: {}", code),
+                        osd::Tone::Error,
+                    );
+                    self.toast(pick("Nothing sent", "Hiçbir şey gönderilmedi"), &body);
                 }
             },
             Cmd::SetDefaultIndex(i) => {
@@ -566,10 +574,16 @@ impl Service {
     fn slow_route(&self, direction: &str) {
         self.emit("transfer.slow", json!({"direction": direction}));
         self.toast(
-            "Slow connection",
-            concat!(
-                "No direct connection to your device, so this transfer goes through the ",
-                "relay and may take a while. Same Wi-Fi network (not a repeater) is fastest."
+            pick("Slow connection", "Yavaş bağlantı"),
+            pick(
+                concat!(
+                    "No direct connection to your device, so this transfer goes through the ",
+                    "relay and may take a while. Being on the same network is fastest."
+                ),
+                concat!(
+                    "Cihazınızla doğrudan bağlantı yok; bu aktarım aracı sunucu (relay) ",
+                    "üzerinden gidiyor ve biraz sürebilir. En hızlısı aynı ağda olmaktır."
+                ),
             ),
         );
     }
@@ -819,9 +833,14 @@ impl Service {
                         json!({"kind": "device-added", "id": hex(&id.0), "name": name, "platform": platform_str(p), "by_name": by}),
                     );
                     self.toast(
-                        "New device in your Warpshot group",
-                        &format!(
-                            "\"{name}\" was added. If this wasn't you, remove it in Settings."
+                        pick(
+                            "New device in your Warpshot group",
+                            "Warpshot grubunuza yeni cihaz eklendi",
+                        ),
+                        &l10n!(
+                            "\"{}\" was added. If this wasn't you, remove it in Settings.",
+                            "\"{}\" eklendi. Bunu siz yapmadıysanız Ayarlar'dan kaldırın.",
+                            name
                         ),
                     );
                 }
@@ -837,8 +856,11 @@ impl Service {
                 drop(dev);
                 self.emit("group.fork", json!({}));
                 self.toast(
-                    "Warpshot security alert",
-                    "Your device group's history was forked. Transfers are stopped; pair your devices again.",
+                    pick("Warpshot security alert", "Warpshot güvenlik uyarısı"),
+                    pick(
+                        "Your device group's history was forked. Transfers are stopped; pair your devices again.",
+                        "Cihaz grubunuzun geçmişi çatallandı. Aktarımlar durduruldu; cihazlarınızı yeniden eşleştirin.",
+                    ),
                 );
             }
             Err(_) => {}
@@ -917,8 +939,8 @@ impl Service {
                 match &res {
                     Ok(()) | Err(NetError::Cancelled) => {}
                     Err(e) => self.toast(
-                        "Transfer failed",
-                        &format!("Couldn't receive ({}).", net_code(e)),
+                        pick("Transfer failed", "Aktarım başarısız"),
+                        &l10n!("Couldn't receive ({}).", "Alınamadı ({}).", net_code(e)),
                     ),
                 }
                 self.emit(
@@ -962,7 +984,7 @@ impl Service {
             .members()
             .get(&sender)
             .map(|d| d.name.clone())
-            .unwrap_or_else(|| "your device".into());
+            .unwrap_or_else(|| pick("your device", "cihazınız").into());
         let cancel = self.track(n, "in", peer_name.clone(), String::new(), items);
         let (ep, _lease) = self.mgr.acquire().await?;
         let mut s = tokio::select! {
@@ -993,16 +1015,17 @@ impl Service {
             net::watch_route(
                 &conn,
                 net::SLOW_ROUTE_AFTER,
-                s.receive(&policy, |_| true),
+                s.receive_keep(&policy, |_| true),
                 || self.slow_route("in"),
             ),
             |note| self.path_note(n, "in", t0, &note),
         )
         .await;
         self.count_route(route);
-        let items = items?;
+        // Items saved before a cancel or an error stay (§8.4): record them too.
+        let (items, res) = items;
         self.on_received(&sender, &peer_name, items).await;
-        Ok(())
+        res
     }
 
     async fn on_received(&self, peer: &EndpointId, peer_name: &str, items: Vec<Received>) {
@@ -1033,7 +1056,7 @@ impl Service {
         }
         let clip = self.setting_bool(&["on_receive", "clipboard"]);
         let notify = self.setting_bool(&["on_receive", "notify"]);
-        let title = format!("From {peer_name}");
+        let title = l10n!("From {}", "{} cihazından", peer_name);
         let files: Vec<PathBuf> = items.iter().filter_map(|r| r.path.clone()).collect();
         let first = items.first().map(|r| (&r.item, r.path.clone()));
         match first {
@@ -1044,7 +1067,7 @@ impl Service {
                     (self.ui)(UiMsg::Toast {
                         title,
                         body: if clip {
-                            format!("Copied: {preview}")
+                            l10n!("Copied: {}", "Kopyalandı: {}", preview)
                         } else {
                             preview
                         },
@@ -1063,9 +1086,13 @@ impl Service {
                     (self.ui)(UiMsg::Toast {
                         title,
                         body: if clip {
-                            "Image copied to the clipboard and saved.".into()
+                            pick(
+                                "Image copied to the clipboard and saved.",
+                                "Görüntü panoya kopyalandı ve kaydedildi.",
+                            )
+                            .into()
                         } else {
-                            "Image saved.".into()
+                            pick("Image saved.", "Görüntü kaydedildi.").into()
                         },
                         image: Some(path),
                     });
@@ -1078,8 +1105,9 @@ impl Service {
                 if notify {
                     self.toast(
                         &title,
-                        &format!(
+                        &l10n!(
                             "{} item(s) saved to {}.",
+                            "{} öğe şuraya kaydedildi: {}",
                             items.len(),
                             self.setting_str("save_dir")
                         ),
@@ -1144,40 +1172,59 @@ impl Service {
                     .into_iter()
                     .find(|(id, _)| *id == to)
                     .map(|(_, (n, _))| n)
-                    .unwrap_or_else(|| "your device".into());
+                    .unwrap_or_else(|| pick("your device", "cihazınız").into());
                 // Hotkey sends: the flyout says it (toast banners are hidden in
                 // full-screen apps); other sends keep the toast.
                 match origin {
-                    Origin::Hotkey => self.flyout(&format!("Sent to {name}"), osd::Tone::Ok),
-                    Origin::Ui => self.toast("Sent", &format!("Sent to {name}.")),
+                    Origin::Hotkey => self.flyout(
+                        &l10n!("Sent to {}", "{} cihazına gönderildi", name),
+                        osd::Tone::Ok,
+                    ),
+                    Origin::Ui => self.toast(
+                        pick("Sent", "Gönderildi"),
+                        &l10n!("Sent to {}.", "{} cihazına gönderildi.", name),
+                    ),
                 }
             }
             // Cancelled here (tray, UI) or on the other device: nothing to report.
             Err(c) if c == "cancelled" => {
                 if origin == Origin::Hotkey {
-                    self.flyout("Cancelled", osd::Tone::Error);
+                    self.flyout(pick("Cancelled", "İptal edildi"), osd::Tone::Error);
                 }
             }
             Err(c) => {
                 let body = match c.as_str() {
-                    "offline" => {
-                        "The device is offline and can't be woken up right now.".to_owned()
-                    }
-                    "no-answer" => "The device didn't respond (battery restrictions?).".to_owned(),
-                    "not-paired" => "Pair a device first (tray icon → Settings).".to_owned(),
-                    other => format!("Sending failed ({other})."),
+                    "offline" => pick(
+                        "The device is offline and can't be woken up right now.",
+                        "Cihaz çevrimdışı ve şu anda uyandırılamıyor.",
+                    )
+                    .to_owned(),
+                    "no-answer" => pick(
+                        "The device didn't respond (battery restrictions?).",
+                        "Cihaz yanıt vermedi (pil kısıtlaması olabilir).",
+                    )
+                    .to_owned(),
+                    "not-paired" => pick(
+                        "Pair a device first (tray icon → Settings).",
+                        "Önce bir cihaz eşleştirin (tepsi simgesi → Ayarlar).",
+                    )
+                    .to_owned(),
+                    other => l10n!("Sending failed ({}).", "Gönderilemedi ({}).", other),
                 };
                 if origin == Origin::Hotkey {
                     let short = match c.as_str() {
-                        "offline" => "device offline".to_owned(),
-                        "no-answer" => "no answer".to_owned(),
-                        "not-paired" => "not paired".to_owned(),
+                        "offline" => pick("device offline", "cihaz çevrimdışı").to_owned(),
+                        "no-answer" => pick("no answer", "yanıt yok").to_owned(),
+                        "not-paired" => pick("not paired", "eşleşme yok").to_owned(),
                         other => other.to_owned(),
                     };
-                    self.flyout(&format!("Not sent: {short}"), osd::Tone::Error);
+                    self.flyout(
+                        &l10n!("Not sent: {}", "Gönderilmedi: {}", short),
+                        osd::Tone::Error,
+                    );
                 }
                 // Failures also go to the notification center as a record.
-                self.toast("Not sent", &body);
+                self.toast(pick("Not sent", "Gönderilmedi"), &body);
             }
         }
         power::trim_working_set();
@@ -1198,7 +1245,7 @@ impl Service {
             .into_iter()
             .find(|(id, _)| *id == target)
             .map(|(_, (name, _))| name)
-            .unwrap_or_else(|| "your device".into());
+            .unwrap_or_else(|| pick("your device", "cihazınız").into());
         let cancel = self.track(n, "out", peer_name, items_label(&items), items.len() as u64);
         // Queued behind another send: still cancellable.
         let _one_at_a_time = tokio::select! {

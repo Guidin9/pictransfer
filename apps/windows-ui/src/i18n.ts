@@ -238,9 +238,13 @@ const tr: Partial<Record<Key, string>> = {
   "alert.fork.action": "Eşleştirmeye git",
 };
 
-// Turkish is the primary UI language (the user is Turkish); English fills any
-// key the Turkish table lacks.
-export const lang: "tr" | "en" = "tr";
+// The system language decides, like in the agent: Turkish for a Turkish
+// Windows, English otherwise. English fills any key the Turkish table lacks.
+export const lang: "tr" | "en" = (navigator.languages?.[0] ?? navigator.language ?? "en")
+  .toLowerCase()
+  .startsWith("tr")
+  ? "tr"
+  : "en";
 export const locale = lang === "tr" ? "tr-TR" : "en-US";
 
 export function t(key: Key, vars?: Record<string, string | number>): string {

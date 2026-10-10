@@ -19,6 +19,7 @@ pub mod autostart;
 pub mod clipboard;
 pub mod dpapi;
 pub mod hotkey;
+pub mod i18n;
 pub mod image;
 pub mod osd;
 pub mod pipe;

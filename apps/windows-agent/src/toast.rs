@@ -132,9 +132,17 @@ pub fn build_xml(t: &Toast<'_>) -> String {
     x.push_str("</binding></visual>");
     if let Some(id) = t.id {
         x.push_str("<actions>");
-        for (label, action) in [("Open", "open"), ("Show in folder", "folder")] {
+        let actions = [
+            (crate::i18n::pick("Open", "Aç"), "open"),
+            (
+                crate::i18n::pick("Show in folder", "Klasörde göster"),
+                "folder",
+            ),
+        ];
+        for (label, action) in actions {
             x.push_str(&format!(
-                "<action content=\"{label}\" arguments=\"{}\" activationType=\"foreground\"/>",
+                "<action content=\"{}\" arguments=\"{}\" activationType=\"foreground\"/>",
+                esc(label),
                 esc(&action_args(action, id))
             ));
         }
@@ -268,12 +276,9 @@ mod tests {
             "{x}"
         );
         assert!(x.contains("launch=\"action=open&amp;id=abc_-1\""), "{x}");
+        assert!(x.contains("arguments=\"action=open&amp;id=abc_-1\""), "{x}");
         assert!(
-            x.contains("content=\"Open\" arguments=\"action=open&amp;id=abc_-1\""),
-            "{x}"
-        );
-        assert!(
-            x.contains("content=\"Show in folder\" arguments=\"action=folder&amp;id=abc_-1\""),
+            x.contains("arguments=\"action=folder&amp;id=abc_-1\""),
             "{x}"
         );
         assert!(!x.contains("protocol"), "no URL protocol activation");

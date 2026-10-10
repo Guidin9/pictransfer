@@ -36,6 +36,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
@@ -103,11 +104,11 @@ fun MainScreen() {
                 val raw = code.rawValue ?: return@addOnSuccessListener
                 val core = Core.forQr(ctx, raw)
                 if (core == null) {
-                    status = "This is not a Warpshot pairing code."
+                    status = ctx.getString(R.string.pair_not_code)
                     return@addOnSuccessListener
                 }
                 busy = true
-                status = "Pairing…"
+                status = ctx.getString(R.string.pairing)
                 scope.launch {
                     val confirm = object : PairConfirm {
                         override fun confirm(sas: String, peerName: String, peerPlatform: ULong): Boolean {
@@ -118,38 +119,38 @@ fun MainScreen() {
                     }
                     status = try {
                         core.pairScan(raw, confirm)
-                        "Paired."
+                        ctx.getString(R.string.paired)
                     } catch (e: Exception) {
-                        "Pairing failed. ${errorText(e)}"
+                        ctx.getString(R.string.pairing_failed, errorText(ctx, e))
                     }
                     sas = null
                     busy = false
                     refresh()
                 }
             }
-            .addOnFailureListener { status = "Scanner unavailable: ${it.javaClass.simpleName}" }
+            .addOnFailureListener { status = ctx.getString(R.string.scanner_unavailable, it.javaClass.simpleName) }
     }
 
     Column(
         Modifier.safeDrawingPadding().padding(20.dp).fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("Warpshot", style = MaterialTheme.typography.headlineMedium)
+        Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineMedium)
         if (pcs.isEmpty()) {
-            Text("Open Warpshot settings on your PC (tray icon → Settings → Pair), then scan the QR code.")
-            Button(onClick = { scanAndPair() }, enabled = !busy) { Text("Scan pairing code") }
+            Text(stringResource(R.string.pair_intro))
+            Button(onClick = { scanAndPair() }, enabled = !busy) { Text(stringResource(R.string.scan_code)) }
         } else {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("Paired devices", style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.paired_devices), style = MaterialTheme.typography.titleMedium)
                     pcs.forEach { Text("• ${it.name}") }
                 }
             }
-            Text("Send a screenshot or file: open it, tap Share and choose Warpshot.")
+            Text(stringResource(R.string.share_hint))
             OutlinedTextField(
                 value = text,
                 onValueChange = { text = it },
-                label = { Text("Text to send") },
+                label = { Text(stringResource(R.string.text_to_send)) },
                 modifier = Modifier.fillMaxWidth(),
             )
             Button(
@@ -158,20 +159,20 @@ fun MainScreen() {
                     val core = Core.get(ctx) ?: return@Button
                     val target = pcs.first().id
                     busy = true
-                    status = "Sending…"
+                    status = ctx.getString(R.string.sending)
                     scope.launch {
                         status = try {
                             core.sendText(target, text, Transfers.newId().toULong())
                             text = ""
-                            "Sent to ${pcs.first().name}."
+                            ctx.getString(R.string.sent_to, pcs.first().name)
                         } catch (e: Exception) {
-                            errorText(e)
+                            errorText(ctx, e)
                         }
                         busy = false
                     }
                 },
-            ) { Text("Send to ${pcs.first().name}") }
-            TextButton(onClick = { scanAndPair() }, enabled = !busy) { Text("Pair another PC") }
+            ) { Text(stringResource(R.string.send_to, pcs.first().name)) }
+            TextButton(onClick = { scanAndPair() }, enabled = !busy) { Text(stringResource(R.string.pair_another)) }
         }
         Spacer(Modifier.height(8.dp))
         if (status.isNotEmpty()) Text(status)
@@ -180,15 +181,13 @@ fun MainScreen() {
     sas?.let { q ->
         AlertDialog(
             onDismissRequest = {},
-            title = { Text("Confirm pairing") },
-            text = {
-                Text("Pair with \"${q.peer}\"?\n\nCheck that your PC shows the same code:\n\n${q.sas}")
-            },
+            title = { Text(stringResource(R.string.confirm_pairing)) },
+            text = { Text(stringResource(R.string.confirm_pairing_body, q.peer, q.sas)) },
             confirmButton = {
-                TextButton(onClick = { q.answer.complete(true); sas = null }) { Text("Codes match") }
+                TextButton(onClick = { q.answer.complete(true); sas = null }) { Text(stringResource(R.string.codes_match)) }
             },
             dismissButton = {
-                TextButton(onClick = { q.answer.complete(false); sas = null }) { Text("Cancel") }
+                TextButton(onClick = { q.answer.complete(false); sas = null }) { Text(stringResource(R.string.cancel)) }
             },
         )
     }

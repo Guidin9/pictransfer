@@ -598,9 +598,14 @@ impl Warpshot {
                     accept_large: false,
                 };
                 let conn = s.conn.clone();
-                let items = self
-                    .observed(&conn, true, s.receive(&policy, |_| true))
-                    .await?;
+                let (items, res) = self
+                    .observed(&conn, true, s.receive_keep(&policy, |_| true))
+                    .await;
+                // Items saved before a cancel or an error stay (§8.4): hand
+                // them to the app; report the error only if nothing arrived.
+                if items.is_empty() {
+                    res?;
+                }
                 Ok(items
                     .into_iter()
                     .map(|r| ReceivedItem {

@@ -24,7 +24,8 @@ use tokio::sync::{broadcast, mpsc};
 use warpshot_agent::{
     clipboard,
     hotkey::{self, Hotkey},
-    image, osd, pipe, power, selftest,
+    i18n::pick,
+    image, l10n, osd, pipe, power, selftest,
     service::{self, Cmd, Service, UiMsg},
     single_instance, toast,
     tray::{self, MenuCommand, MenuModel, Tray},
@@ -79,15 +80,24 @@ fn on_hotkey(hwnd: HWND) {
         Ok(Some(content)) => {
             let target = with_app(|a| send_target_name(&a.menu)).flatten();
             let text = match target {
-                Some(name) => format!("Sending to {name}…"),
-                None => "Sending…".to_owned(),
+                Some(name) => l10n!("Sending to {}…", "{} cihazına gönderiliyor…", name),
+                None => pick("Sending…", "Gönderiliyor…").to_owned(),
             };
             osd::show(&text, osd::Tone::Busy);
             with_app(|a| a.cmd.send(Cmd::SendClip(content)));
         }
-        Ok(None) => osd::show("Nothing to send: the clipboard is empty", osd::Tone::Error),
+        Ok(None) => osd::show(
+            pick(
+                "Nothing to send: the clipboard is empty",
+                "Gönderilecek bir şey yok: pano boş",
+            ),
+            osd::Tone::Error,
+        ),
         Err(_) => osd::show(
-            "Nothing sent: the clipboard could not be read",
+            pick(
+                "Nothing sent: the clipboard could not be read",
+                "Gönderilmedi: pano okunamadı",
+            ),
             osd::Tone::Error,
         ),
     }
@@ -115,7 +125,10 @@ fn open_ui() {
         }
         _ => show_toast(
             "Warpshot",
-            "The settings window (warpshot-ui.exe) is not installed next to the agent.",
+            pick(
+                "The settings window (warpshot-ui.exe) is not installed next to the agent.",
+                "Ayarlar penceresi (warpshot-ui.exe) ajanın yanında kurulu değil.",
+            ),
             None,
         ),
     }
@@ -191,8 +204,14 @@ fn on_ui_msg(hwnd: HWND, msg: UiMsg) {
                 hotkey::unregister(hwnd, HOTKEY_SEND);
                 if hotkey::register(hwnd, HOTKEY_SEND, &hk).is_err() {
                     show_toast(
-                        "Warpshot hotkey is taken",
-                        "Another app uses this hotkey. Choose a different one in Settings.",
+                        pick(
+                            "Warpshot hotkey is taken",
+                            "Warpshot kısayol tuşu kullanımda",
+                        ),
+                        pick(
+                            "Another app uses this hotkey. Choose a different one in Settings.",
+                            "Bu kısayolu başka bir uygulama kullanıyor. Ayarlar'dan başka bir tane seçin.",
+                        ),
                         None,
                     );
                 }
@@ -290,7 +309,11 @@ fn spawn_runtime_thread(hwnd: usize, mut cmds: mpsc::UnboundedReceiver<Cmd>) {
                 let svc = match Service::open(sink, events.clone()) {
                     Ok(s) => s,
                     Err(code) => {
-                        post_toast(hwnd, "Warpshot could not start", format!("Error: {code}"));
+                        post_toast(
+                            hwnd,
+                            pick("Warpshot could not start", "Warpshot başlatılamadı"),
+                            l10n!("Error: {}", "Hata: {}", code),
+                        );
                         return;
                     }
                 };
@@ -304,7 +327,11 @@ fn spawn_runtime_thread(hwnd: usize, mut cmds: mpsc::UnboundedReceiver<Cmd>) {
                     Err(_) => post_toast(
                         hwnd,
                         "Warpshot",
-                        "The settings channel is unavailable (pipe-in-use).".into(),
+                        pick(
+                            "The settings channel is unavailable (pipe-in-use).",
+                            "Ayarlar kanalı kullanılamıyor (pipe-in-use).",
+                        )
+                        .into(),
                     ),
                 }
                 while let Some(cmd) = cmds.recv().await {
@@ -386,8 +413,14 @@ fn run_agent() -> ExitCode {
         && let Err(hotkey::RegisterError::Taken) = hotkey::register(hwnd, HOTKEY_SEND, &hk)
     {
         let _ = toast::show(&toast::Toast {
-            title: "Warpshot hotkey is taken",
-            body: "Another app uses Ctrl+Alt+Shift+S. Choose a different hotkey in Settings.",
+            title: pick(
+                "Warpshot hotkey is taken",
+                "Warpshot kısayol tuşu kullanımda",
+            ),
+            body: pick(
+                "Another app uses Ctrl+Alt+Shift+S. Choose a different hotkey in Settings.",
+                "Ctrl+Alt+Shift+S'yi başka bir uygulama kullanıyor. Ayarlar'dan başka bir kısayol seçin.",
+            ),
             ..Default::default()
         });
     }

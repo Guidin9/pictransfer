@@ -26,7 +26,7 @@
             android:name=".ShareActivity"
             android:excludeFromRecents="true"
             android:exported="true"
-            android:label="Send to PC"
+            android:label="@string/share_label"
             android:theme="@style/Theme.Warpshot.Translucent">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

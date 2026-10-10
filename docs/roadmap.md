@@ -183,6 +183,21 @@ path, NAT, port mapping, endpoint, membership log).
    orphaned first Firebase key; redeploy the server (BOM-tolerant FCM
    parse); push to GitHub.
 
+8. ✓ **Language (2026-10-10):** the agent (toasts, tray, flyout), the
+   settings window and the Android app follow the system language: Turkish
+   on a Turkish system, English otherwise (`WARPSHOT_LANG=en|tr` overrides
+   the agent; Android uses `values-tr`). Checked live (phone notifications
+   in Turkish) and headless in both languages.
+9. ✓ **Small fixes (2026-10-10):** a receive that is cancelled or fails after
+   some items were saved now still reports those items (history,
+   notifications, gallery; `Session::receive_keep`); "sent" notices on
+   Android have their own notification channel.
+10. **Known limit:** a send cancelled while waiting for the woken device can
+    still make that device show "Couldn't receive" if it dials in late. A
+    proper fix needs one accept dispatcher per endpoint that answers
+    cancelled sessions with `CANCELLED` (today each send runs its own accept
+    loop).
+
 ## Security testing (attack our own app) — before wider use
 
 Mode (user, 2026-10-10): as aggressive as possible, white-box, against our

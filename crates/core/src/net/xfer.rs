@@ -658,17 +658,33 @@ impl Session {
         policy: &Policy,
         decide: impl FnMut(&Item) -> bool,
     ) -> Result<Vec<Received>, NetError> {
+        let (items, res) = self.receive_keep(policy, decide).await;
+        res.map(|()| items)
+    }
+
+    /// Like [`Session::receive`], but also returns the items that were saved
+    /// and acknowledged before an error or a cancel: they stay (§8.4), so the
+    /// caller still records them (history, notifications, gallery).
+    pub async fn receive_keep(
+        self,
+        policy: &Policy,
+        decide: impl FnMut(&Item) -> bool,
+    ) -> (Vec<Received>, Result<(), NetError>) {
         let (conn, cancel) = (self.conn.clone(), self.cancel.clone());
-        self.receive_inner(policy, decide)
+        let mut out = Vec::new();
+        let res = self
+            .receive_inner(policy, decide, &mut out)
             .await
-            .map_err(|e| outcome(&conn, cancel.as_ref(), e))
+            .map_err(|e| outcome(&conn, cancel.as_ref(), e));
+        (out, res)
     }
 
     async fn receive_inner(
         mut self,
         policy: &Policy,
         mut decide: impl FnMut(&Item) -> bool,
-    ) -> Result<Vec<Received>, NetError> {
+        out: &mut Vec<Received>,
+    ) -> Result<(), NetError> {
         let Ctrl::Offer { items, .. } = self.recv_ctrl().await? else {
             return Err(self.fail(NetError::Xfer(xfer::XferError::Shape)));
         };
@@ -685,12 +701,11 @@ impl Session {
             };
             self.send_ctrl(&Ctrl::Decline { reason }).await?;
             let _ = tokio::time::timeout(IDLE_TIMEOUT, self.conn.closed()).await;
-            return Ok(vec![]);
+            return Ok(());
         }
         self.send_ctrl(&Ctrl::Accept { ids: ids.clone() }).await?;
         let total = streamed_total(items.iter(), &ids);
         self.meter_start(total);
-        let mut out = Vec::new();
         for item in items.into_iter().filter(|i| ids.contains(&i.id)) {
             if item.is_inline() {
                 out.push(Received { item, path: None });
@@ -749,7 +764,7 @@ impl Session {
             Ok(_) => return Err(self.fail(NetError::Xfer(xfer::XferError::Shape))),
             Err(_) => {}
         }
-        Ok(out)
+        Ok(())
     }
 
     async fn receive_stream(

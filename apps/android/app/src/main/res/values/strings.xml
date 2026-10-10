@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- English (default). Turkish in values-tr/strings.xml. -->
+<resources>
+    <string name="app_name" translatable="false">Warpshot</string>
+    <string name="share_label">Send to PC</string>
+
+    <!-- Main screen and pairing -->
+    <string name="pair_not_code">This is not a Warpshot pairing code.</string>
+    <string name="pairing">Pairing…</string>
+    <string name="paired">Paired.</string>
+    <string name="pairing_failed">Pairing failed. %1$s</string>
+    <string name="scanner_unavailable">Scanner unavailable: %1$s</string>
+    <string name="pair_intro">Open Warpshot settings on your PC (tray icon → Settings → Pair), then scan the QR code.</string>
+    <string name="scan_code">Scan pairing code</string>
+    <string name="paired_devices">Paired devices</string>
+    <string name="share_hint">Send a screenshot or file: open it, tap Share and choose Warpshot.</string>
+    <string name="text_to_send">Text to send</string>
+    <string name="sending">Sending…</string>
+    <string name="sent_to">Sent to %1$s.</string>
+    <string name="send_to">Send to %1$s</string>
+    <string name="pair_another">Pair another PC</string>
+    <string name="confirm_pairing">Confirm pairing</string>
+    <string name="confirm_pairing_body">Pair with \"%1$s\"?\n\nCheck that your PC shows the same code:\n\n%2$s</string>
+    <string name="codes_match">Codes match</string>
+    <string name="cancel">Cancel</string>
+
+    <!-- Share card -->
+    <string name="preparing">Preparing…</string>
+    <string name="close">Close</string>
+    <string name="continue_background">Continue in background</string>
+    <string name="sending_to">Sending to %1$s</string>
+    <string name="sending_item_to">Sending %1$s to %2$s</string>
+    <string name="pair_first_open">Open Warpshot and pair with your PC first.</string>
+    <string name="cant_read_shared">Couldn\'t read the shared item.</string>
+    <string name="nothing_to_send">Nothing to send.</string>
+    <string name="cancelled">Cancelled.</string>
+    <string name="start_not_allowed">Android didn\'t allow the transfer to start.</string>
+    <string name="start_failed">Couldn\'t start sending. Try again.</string>
+
+    <!-- Transfers and notifications -->
+    <string name="your_pc">your PC</string>
+    <string name="couldnt_save">Couldn\'t save %1$s.</string>
+    <string name="connecting">Connecting…</string>
+    <string name="waiting_for">Waiting for %1$s…</string>
+    <string name="percent">%1$d %%</string>
+    <string name="rate">%1$s/s</string>
+    <string name="slow_title">Slow connection</string>
+    <string name="slow_text">No direct connection to your PC; this transfer goes through the relay.</string>
+    <string name="slow_big">No direct connection to your PC, so this transfer goes through the relay and may take a while. Being on the same network as the PC is fastest.</string>
+    <string name="connecting_pc">Connecting to your PC…</string>
+    <string name="receiving_from">Receiving from %1$s</string>
+    <string name="n_transfers">%1$d transfers</string>
+    <string name="from_peer">from %1$s</string>
+    <string name="to_peer">to %1$s</string>
+    <string name="cancel_all">Cancel all</string>
+    <string name="sent_title">Sent to %1$s</string>
+    <string name="not_sent_title">Not sent to %1$s</string>
+    <string name="text_from">Text from %1$s</string>
+    <string name="copied">Copied: %1$s</string>
+    <string name="image_from">Image from %1$s</string>
+    <string name="file_from">File from %1$s</string>
+    <string name="image_saved">Copied and saved to Pictures/Warpshot</string>
+    <string name="file_saved">%1$s saved to Download/Warpshot</string>
+    <string name="receive_failed">Couldn\'t receive from your PC</string>
+    <string name="channel_received">Received from your PC</string>
+    <string name="channel_sent">Sent to your PC</string>
+    <string name="channel_progress">Transfers in progress</string>
+    <string name="channel_connection">Connection notices</string>
+
+    <!-- Errors -->
+    <string name="err_offline">Your PC is offline.</string>
+    <string name="err_not_paired">Pair with your PC first.</string>
+    <string name="err_rejected">The PC refused the transfer.</string>
+    <string name="err_network">Network error (%1$s).</string>
+    <string name="err_server">Server error (%1$s).</string>
+    <string name="err_invalid">Invalid input.</string>
+    <string name="err_storage">Storage error.</string>
+    <string name="err_other">Error: %1$s</string>
+</resources>

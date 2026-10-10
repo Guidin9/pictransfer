@@ -7,6 +7,8 @@
 
 use std::io;
 
+use crate::i18n::pick;
+
 use windows_sys::Win32::{
     Foundation::{HWND, POINT},
     System::LibraryLoader::GetModuleHandleW,
@@ -165,7 +167,7 @@ pub fn tooltip(transfers: &[TransferItem]) -> String {
     match transfers {
         [] => "Warpshot".into(),
         [t] => format!("Warpshot: {}", t.text),
-        many => format!("Warpshot: {} transfers", many.len()),
+        many => crate::l10n!("Warpshot: {} transfers", "Warpshot: {} aktarım", many.len()),
     }
 }
 
@@ -214,7 +216,7 @@ fn build_menu(model: &MenuModel) -> HMENU {
                 root,
                 MF_STRING,
                 item_id(ID_CANCEL_BASE, i) as usize,
-                wide(&format!("Cancel: {}", t.text)).as_ptr(),
+                wide(&crate::l10n!("Cancel: {}", "İptal: {}", t.text)).as_ptr(),
             );
         }
         if !model.transfers.is_empty() {
@@ -226,14 +228,18 @@ fn build_menu(model: &MenuModel) -> HMENU {
                 devices,
                 MF_STRING | MF_GRAYED,
                 0,
-                wide("No paired devices").as_ptr(),
+                wide(pick("No paired devices", "Eşleşmiş cihaz yok")).as_ptr(),
             );
         }
         for (i, d) in model.devices.iter().take(MAX_ITEMS).enumerate() {
             let label = format!(
                 "{} — {}",
                 d.name,
-                if d.online { "online" } else { "offline" }
+                if d.online {
+                    pick("online", "çevrimiçi")
+                } else {
+                    pick("offline", "çevrimdışı")
+                }
             );
             AppendMenuW(
                 devices,
@@ -242,7 +248,12 @@ fn build_menu(model: &MenuModel) -> HMENU {
                 wide(&label).as_ptr(),
             );
         }
-        AppendMenuW(root, MF_POPUP, devices as usize, wide("Devices").as_ptr());
+        AppendMenuW(
+            root,
+            MF_POPUP,
+            devices as usize,
+            wide(pick("Devices", "Cihazlar")).as_ptr(),
+        );
 
         let targets = CreatePopupMenu();
         if model.targets.is_empty() {
@@ -250,7 +261,7 @@ fn build_menu(model: &MenuModel) -> HMENU {
                 targets,
                 MF_STRING | MF_GRAYED,
                 0,
-                wide("No targets yet").as_ptr(),
+                wide(pick("No targets yet", "Henüz hedef yok")).as_ptr(),
             );
         }
         let n = model.targets.len().min(MAX_ITEMS);
@@ -271,16 +282,26 @@ fn build_menu(model: &MenuModel) -> HMENU {
                 MF_BYCOMMAND,
             );
         }
-        AppendMenuW(root, MF_POPUP, targets as usize, wide("Send to").as_ptr());
+        AppendMenuW(
+            root,
+            MF_POPUP,
+            targets as usize,
+            wide(pick("Send to", "Gönderim hedefi")).as_ptr(),
+        );
 
         AppendMenuW(root, MF_SEPARATOR, 0, std::ptr::null());
         AppendMenuW(
             root,
             MF_STRING,
             ID_SETTINGS as usize,
-            wide("Settings…").as_ptr(),
+            wide(pick("Settings…", "Ayarlar…")).as_ptr(),
         );
-        AppendMenuW(root, MF_STRING, ID_QUIT as usize, wide("Quit").as_ptr());
+        AppendMenuW(
+            root,
+            MF_STRING,
+            ID_QUIT as usize,
+            wide(pick("Quit", "Çıkış")).as_ptr(),
+        );
         root
     }
 }
@@ -367,7 +388,7 @@ mod tests {
         };
         assert_eq!(tooltip(&[]), "Warpshot");
         assert_eq!(tooltip(&[t(1)]), "Warpshot: Receiving from Pixel: 3 %");
-        assert_eq!(tooltip(&[t(1), t(2)]), "Warpshot: 2 transfers");
+        assert!(tooltip(&[t(1), t(2)]).starts_with("Warpshot: 2 "));
     }
 
     #[test]

@@ -143,14 +143,15 @@ object Core {
     var defaultTarget: String? = null
 }
 
-fun errorText(e: Throwable): String = when (e) {
-    is WarpException.Cancelled -> "Cancelled."
-    is WarpException.Offline -> "Your PC is offline."
-    is WarpException.NotPaired -> "Pair with your PC first."
-    is WarpException.Rejected -> "The PC refused the transfer."
-    is WarpException.Network -> "Network error (${e.code})."
-    is WarpException.Server -> "Server error (${e.code})."
-    is WarpException.Invalid -> "Invalid input."
-    is WarpException.Storage -> "Storage error."
-    else -> "Error: ${e.javaClass.simpleName}"
+/** A short, translated reason for a failed core call (codes only, no content). */
+fun errorText(ctx: Context, e: Throwable): String = when (e) {
+    is WarpException.Cancelled -> ctx.getString(R.string.cancelled)
+    is WarpException.Offline -> ctx.getString(R.string.err_offline)
+    is WarpException.NotPaired -> ctx.getString(R.string.err_not_paired)
+    is WarpException.Rejected -> ctx.getString(R.string.err_rejected)
+    is WarpException.Network -> ctx.getString(R.string.err_network, e.code.toString())
+    is WarpException.Server -> ctx.getString(R.string.err_server, e.code)
+    is WarpException.Invalid -> ctx.getString(R.string.err_invalid)
+    is WarpException.Storage -> ctx.getString(R.string.err_storage)
+    else -> ctx.getString(R.string.err_other, e.javaClass.simpleName)
 }

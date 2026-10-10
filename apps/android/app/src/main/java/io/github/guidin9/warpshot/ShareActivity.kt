@@ -24,6 +24,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.IntentCompat
@@ -44,7 +45,7 @@ import kotlinx.coroutines.withContext
  * stop the send; the ongoing notification keeps showing it with Cancel.
  */
 class ShareActivity : ComponentActivity() {
-    private var message by mutableStateOf("Preparing…")
+    private var message by mutableStateOf("")
     private var transferId by mutableStateOf<Long?>(null)
     private var closable by mutableStateOf(false)
     private var preparing: Job? = null
@@ -56,16 +57,16 @@ class ShareActivity : ComponentActivity() {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
                     Card(Modifier.padding(24.dp).fillMaxWidth()) {
                         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text("Warpshot", style = MaterialTheme.typography.titleMedium)
+                            Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleMedium)
                             val all by Transfers.state.collectAsState()
                             val t = transferId?.let { all[it] }
                             if (t != null && t.outcome == null) Running(t) else Text(message)
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                 if (closable) {
-                                    TextButton(onClick = { finish() }) { Text("Close") }
+                                    TextButton(onClick = { finish() }) { Text(stringResource(R.string.close)) }
                                 } else {
-                                    TextButton(onClick = { cancel() }) { Text("Cancel") }
-                                    if (t != null) TextButton(onClick = { finish() }) { Text("Continue in background") }
+                                    TextButton(onClick = { cancel() }) { Text(stringResource(R.string.cancel)) }
+                                    if (t != null) TextButton(onClick = { finish() }) { Text(stringResource(R.string.continue_background)) }
                                 }
                             }
                         }
@@ -79,7 +80,11 @@ class ShareActivity : ComponentActivity() {
     @androidx.compose.runtime.Composable
     private fun Running(t: TransferState) {
         Text(
-            if (t.label.isEmpty()) "Sending to ${t.peer}" else "Sending ${t.label} to ${t.peer}",
+            if (t.label.isEmpty()) {
+                stringResource(R.string.sending_to, t.peer)
+            } else {
+                stringResource(R.string.sending_item_to, t.label, t.peer)
+            },
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
@@ -113,7 +118,7 @@ class ShareActivity : ComponentActivity() {
         transferId?.let { Transfers.watched -= it }
         transferId = null
         closable = false
-        message = "Preparing…"
+        message = getString(R.string.preparing)
         preparing = lifecycleScope.launch { prepareAndSend(intent) }
     }
 
@@ -130,25 +135,25 @@ class ShareActivity : ComponentActivity() {
     private suspend fun prepareAndSend(intent: Intent) {
         val core = Core.get(this)
         val pc = core?.let { c -> runCatching { c.devices() }.getOrNull()?.firstOrNull { !it.me } }
-        if (core == null || pc == null) return finishWith("Open Warpshot and pair with your PC first.")
+        if (core == null || pc == null) return finishWith(getString(R.string.pair_first_open))
         val text = intent.getStringExtra(Intent.EXTRA_TEXT)
         val uris = uris(intent)
         val id = Transfers.newId()
         when {
             uris.isNotEmpty() -> {
                 val files = withContext(Dispatchers.IO) { uris.mapNotNull { copyToCache(it) } }
-                if (files.isEmpty()) return finishWith("Couldn't read the shared item.")
+                if (files.isEmpty()) return finishWith(getString(R.string.cant_read_shared))
                 val label = files.first().name + if (files.size > 1) " +${files.size - 1}" else ""
                 if (!handOver(id, pc.id, pc.name, label, null, files.map { it.path })) return
             }
             !text.isNullOrEmpty() -> if (!handOver(id, pc.id, pc.name, "", text, emptyList())) return
-            else -> return finishWith("Nothing to send.")
+            else -> return finishWith(getString(R.string.nothing_to_send))
         }
         transferId = id
         val end = Transfers.state.first { it[id]?.outcome != null }[id]?.outcome
         when (end) {
-            Outcome.Done -> finishWith("Sent to ${pc.name}.", auto = true)
-            Outcome.Cancelled -> finishWith("Cancelled.", auto = true)
+            Outcome.Done -> finishWith(getString(R.string.sent_to, pc.name), auto = true)
+            Outcome.Cancelled -> finishWith(getString(R.string.cancelled), auto = true)
             is Outcome.Failed -> finishWith(end.message)
             null -> {}
         }
@@ -162,9 +167,9 @@ class ShareActivity : ComponentActivity() {
             true
         } catch (_: Exception) {
             Transfers.watched -= id
-            Transfers.finish(id, Outcome.Failed("Android didn't allow the transfer to start."))
+            Transfers.finish(id, Outcome.Failed(getString(R.string.start_not_allowed)))
             Outgoing.delete(this, paths)
-            finishWith("Couldn't start sending. Try again.")
+            finishWith(getString(R.string.start_failed))
             false
         }
     }

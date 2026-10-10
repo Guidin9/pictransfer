@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="share_label">PC\'ye gönder</string>
+
+    <!-- Ana ekran ve eşleştirme -->
+    <string name="pair_not_code">Bu bir Warpshot eşleştirme kodu değil.</string>
+    <string name="pairing">Eşleştiriliyor…</string>
+    <string name="paired">Eşleştirildi.</string>
+    <string name="pairing_failed">Eşleştirme başarısız. %1$s</string>
+    <string name="scanner_unavailable">Tarayıcı kullanılamıyor: %1$s</string>
+    <string name="pair_intro">PC\'nizde Warpshot ayarlarını açın (tepsi simgesi → Ayarlar → Eşleştirme), sonra QR kodu tarayın.</string>
+    <string name="scan_code">Eşleştirme kodunu tara</string>
+    <string name="paired_devices">Eşleşmiş cihazlar</string>
+    <string name="share_hint">Ekran görüntüsü veya dosya göndermek için: açın, Paylaş\'a dokunun ve Warpshot\'ı seçin.</string>
+    <string name="text_to_send">Gönderilecek metin</string>
+    <string name="sending">Gönderiliyor…</string>
+    <string name="sent_to">%1$s cihazına gönderildi.</string>
+    <string name="send_to">%1$s cihazına gönder</string>
+    <string name="pair_another">Başka bir PC eşleştir</string>
+    <string name="confirm_pairing">Eşleştirmeyi onayla</string>
+    <string name="confirm_pairing_body">\"%1$s\" ile eşleştirilsin mi?\n\nPC\'nizde aynı kodun göründüğünü kontrol edin:\n\n%2$s</string>
+    <string name="codes_match">Kodlar aynı</string>
+    <string name="cancel">İptal</string>
+
+    <!-- Paylaşım kartı -->
+    <string name="preparing">Hazırlanıyor…</string>
+    <string name="close">Kapat</string>
+    <string name="continue_background">Arka planda sürdür</string>
+    <string name="sending_to">%1$s cihazına gönderiliyor</string>
+    <string name="sending_item_to">%1$s, %2$s cihazına gönderiliyor</string>
+    <string name="pair_first_open">Önce Warpshot\'ı açıp PC\'nizle eşleştirin.</string>
+    <string name="cant_read_shared">Paylaşılan öğe okunamadı.</string>
+    <string name="nothing_to_send">Gönderilecek bir şey yok.</string>
+    <string name="cancelled">İptal edildi.</string>
+    <string name="start_not_allowed">Android aktarımın başlamasına izin vermedi.</string>
+    <string name="start_failed">Gönderim başlatılamadı. Tekrar deneyin.</string>
+
+    <!-- Aktarımlar ve bildirimler -->
+    <string name="your_pc">PC\'niz</string>
+    <string name="couldnt_save">%1$s kaydedilemedi.</string>
+    <string name="connecting">Bağlanıyor…</string>
+    <string name="waiting_for">%1$s bekleniyor…</string>
+    <string name="percent">%%%1$d</string>
+    <string name="rate">%1$s/sn</string>
+    <string name="slow_title">Yavaş bağlantı</string>
+    <string name="slow_text">PC\'nizle doğrudan bağlantı yok; bu aktarım aracı sunucu üzerinden gidiyor.</string>
+    <string name="slow_big">PC\'nizle doğrudan bağlantı yok; bu aktarım aracı sunucu (relay) üzerinden gidiyor ve biraz sürebilir. En hızlısı PC ile aynı ağda olmaktır.</string>
+    <string name="connecting_pc">PC\'nize bağlanılıyor…</string>
+    <string name="receiving_from">%1$s cihazından alınıyor</string>
+    <string name="n_transfers">%1$d aktarım</string>
+    <string name="from_peer">%1$s cihazından</string>
+    <string name="to_peer">%1$s cihazına</string>
+    <string name="cancel_all">Tümünü iptal et</string>
+    <string name="sent_title">%1$s cihazına gönderildi</string>
+    <string name="not_sent_title">%1$s cihazına gönderilemedi</string>
+    <string name="text_from">%1$s cihazından metin</string>
+    <string name="copied">Kopyalandı: %1$s</string>
+    <string name="image_from">%1$s cihazından görüntü</string>
+    <string name="file_from">%1$s cihazından dosya</string>
+    <string name="image_saved">Kopyalandı ve Pictures/Warpshot klasörüne kaydedildi</string>
+    <string name="file_saved">%1$s, Download/Warpshot klasörüne kaydedildi</string>
+    <string name="receive_failed">PC\'nizden alınamadı</string>
+    <string name="channel_received">PC\'nizden gelenler</string>
+    <string name="channel_sent">PC\'nize gönderilenler</string>
+    <string name="channel_progress">Süren aktarımlar</string>
+    <string name="channel_connection">Bağlantı bildirimleri</string>
+
+    <!-- Hatalar -->
+    <string name="err_offline">PC\'niz çevrimdışı.</string>
+    <string name="err_not_paired">Önce PC\'nizle eşleştirin.</string>
+    <string name="err_rejected">PC aktarımı reddetti.</string>
+    <string name="err_network">Ağ hatası (%1$s).</string>
+    <string name="err_server">Sunucu hatası (%1$s).</string>
+    <string name="err_invalid">Geçersiz giriş.</string>
+    <string name="err_storage">Depolama hatası.</string>
+    <string name="err_other">Hata: %1$s</string>
+</resources>
