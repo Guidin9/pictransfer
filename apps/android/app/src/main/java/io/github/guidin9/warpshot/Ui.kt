@@ -106,12 +106,16 @@ fun IconTile(
     }
 }
 
-/** "Sending x to PC" / "Receiving from PC" for a transfer. */
+/**
+ * The file's name for a file send (the arrow and the target card above say
+ * where it goes; "name, Sending to PC" didn't fit), else "Sending to PC" /
+ * "Receiving from PC".
+ */
 @Composable
 fun transferTitle(t: TransferState): String = when {
     t.incoming -> stringResource(R.string.receiving_from, t.peer)
     t.label.isEmpty() -> stringResource(R.string.sending_to, t.peer)
-    else -> stringResource(R.string.sending_item_to, t.label, t.peer)
+    else -> t.label
 }
 
 /** One running transfer: direction, name, progress and Cancel. */

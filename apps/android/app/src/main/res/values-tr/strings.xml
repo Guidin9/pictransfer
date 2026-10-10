@@ -56,7 +56,6 @@
     <string name="close">Kapat</string>
     <string name="continue_background">Arka planda sürdür</string>
     <string name="sending_to">%1$s cihazına gönderiliyor</string>
-    <string name="sending_item_to">%1$s, %2$s cihazına gönderiliyor</string>
     <string name="pair_first_open">Önce Warpshot\'ı açıp PC\'nizle eşleştirin.</string>
     <string name="cant_read_shared">Paylaşılan öğe okunamadı.</string>
     <string name="nothing_to_send">Gönderilecek bir şey yok.</string>

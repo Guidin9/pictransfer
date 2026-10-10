@@ -58,7 +58,6 @@
     <string name="close">Close</string>
     <string name="continue_background">Continue in background</string>
     <string name="sending_to">Sending to %1$s</string>
-    <string name="sending_item_to">Sending %1$s to %2$s</string>
     <string name="pair_first_open">Open Warpshot and pair with your PC first.</string>
     <string name="cant_read_shared">Couldn\'t read the shared item.</string>
     <string name="nothing_to_send">Nothing to send.</string>
