@@ -140,7 +140,12 @@ path, NAT, port mapping, endpoint, membership log).
    Checked in the emulator (docs/dev-setup.md §9) in both languages and
    themes, and live against a test group: pairing with matching SAS,
    notification permission denied → card → granted, text, photo picker and
-   a 40 MB file to the PC, share sheet.
+   a 40 MB file to the PC, share sheet. Live check (S21 FE, 2026-10-10,
+   installed over the old build, pairing kept): text from the home screen
+   (snackbar), PC → phone 30 MB with its progress on the home screen
+   (10.9 s, direct), phone → PC 30 MB via Files (4.5 s, ~8 MB/s, direct),
+   the photo picker (arrived as `IMG_20261010_184819.png`), the share sheet
+   (text sent and the sheet closed within 2 s).
    Open: received partial files in `cache/inbox` after a killed process.
 2. ✓ **Hotkey feedback on the PC:** an on-screen flyout above the taskbar
    (`osd.rs`) says "Sending to …" the moment the hotkey is pressed, then
