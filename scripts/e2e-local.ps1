@@ -63,7 +63,9 @@ try {
     $bytes = New-Object byte[] 300000
     (New-Object System.Random 7).NextBytes($bytes)
     [IO.File]::WriteAllBytes($file, $bytes)
-    $sent = Invoke-W @('send', 'desk-pc', '--dir', $b, '--no-relay', '--addr-file', $addr, '--text', 'selam', $file) | ConvertFrom-Json
+    # warpctl also prints path events; the result is the `sent` line.
+    $sent = Invoke-W @('send', 'desk-pc', '--dir', $b, '--no-relay', '--addr-file', $addr, '--text', 'selam', $file) |
+        Where-Object { $_ -like '*"ev":"sent"*' } | ConvertFrom-Json
     $procs[1].WaitForExit(15000) | Out-Null
     if (-not $sent.ok) { throw 'send reported failure' }
     $got = [IO.File]::ReadAllBytes((Join-Path $inbox 'photo.png'))
