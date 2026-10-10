@@ -71,24 +71,36 @@ export function HistoryPage() {
               <div className="row-text">
                 {/* Names are shown as plain text only; React escapes them. */}
                 <div className="row-title" title={h.name}>
-                  {h.name ?? t(`history.kind.${h.kind}`)}
+                  <span className="row-title-text">{h.name ?? t(`history.kind.${h.kind}`)}</span>
                   {!h.ok && <span className="badge danger">{t("history.failed")}</span>}
                 </div>
                 <div className="row-desc">
-                  {t(h.direction === "in" ? "history.in" : "history.out", { peer: h.peer })}
-                  {" · "}
-                  {t(`history.kind.${h.kind}`)}
-                  {" · "}
-                  {formatSize(h.size)}
-                  {" · "}
-                  {fmt.format(h.ts)}
+                  {/* Short parts wrap as a whole ("258,4 MB", not "258,4 / MB");
+                      the peer sentence may wrap anywhere (long device names). */}
+                  {[
+                    t(h.direction === "in" ? "history.in" : "history.out", { peer: h.peer }),
+                    t(`history.kind.${h.kind}`),
+                    formatSize(h.size),
+                    fmt.format(h.ts),
+                  ].map((part, i) => (
+                    <span className={i > 0 ? "desc-part" : undefined} key={i}>
+                      {i > 0 && " · "}
+                      {part}
+                    </span>
+                  ))}
                 </div>
               </div>
               <div className="row-control">
                 {h.path && h.ok && (
-                  <button type="button" className="btn subtle" onClick={() => void act(() => rpc("history.reveal", { id: h.id }), false)}>
+                  <button
+                    type="button"
+                    className="btn subtle reveal"
+                    title={t("history.reveal")}
+                    aria-label={t("history.reveal")}
+                    onClick={() => void act(() => rpc("history.reveal", { id: h.id }), false)}
+                  >
                     <Icon name="folder" />
-                    {t("history.reveal")}
+                    <span className="btn-label">{t("history.reveal")}</span>
                   </button>
                 )}
                 <button

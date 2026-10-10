@@ -378,6 +378,33 @@ p {
   color: var(--accent);
 }
 
+/* Long names end in "…" (full name in the tooltip); the badge never shrinks. */
+.row-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-title .badge {
+  flex: none;
+}
+
+.desc-part {
+  white-space: nowrap;
+}
+
+/* Narrow window: "Show in folder" becomes icon-only (label in the tooltip). */
+@media (max-width: 860px) {
+  .btn.reveal {
+    padding: 5px 8px;
+  }
+
+  .btn.reveal .btn-label {
+    display: none;
+  }
+}
+
 .row.history.failed .row-title {
   color: var(--text-2);
 }

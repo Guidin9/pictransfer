@@ -152,8 +152,11 @@ path, NAT, port mapping, endpoint, membership log).
    `route_slow` counted it. Tray icon embedded (item 4).
    **Open decision (user, later):** our own relay for fast non-direct
    transfers (a small VPS or a free cloud VM; not $0-by-default).
-5. **Windows UI history bug:** the "Klasörde göster" (reveal in folder)
-   button overlaps the text behind it in the history list; fix the layout.
+5. ✓ **Windows UI history bug:** long names were cut off hard at the
+   "Klasörde göster" button. Now names end in "…" (full name in the tooltip),
+   the "failed" badge never shrinks, size/date don't break mid-value, and
+   below 860 px the reveal button is icon-only (checked headless at 720 and
+   960 px with long Turkish names).
 6. **Security tests for key theft:** stolen-key scenario, revocation
    ("lost or stolen") refusal, whether past transfers stay safe (forward
    secrecy) — add to the security plan below.
