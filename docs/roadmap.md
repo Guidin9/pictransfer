@@ -146,7 +146,11 @@ path, NAT, port mapping, endpoint, membership log).
    (10.9 s, direct), phone → PC 30 MB via Files (4.5 s, ~8 MB/s, direct),
    the photo picker (arrived as `IMG_20261010_184819.png`), the share sheet
    (text sent and the sheet closed within 2 s).
-   Open: received partial files in `cache/inbox` after a killed process.
+   Fixed later: received partial files left in `cache/inbox` by a killed
+   process are swept on the next start (checked on the phone with a planted
+   `.part` file). Release builds use R8 (rules in `proguard-rules.pro`, incl.
+   Firebase/ML Kit registrar constructors): APK 33.3 → 11.6 MB, background
+   memory 103 → 50 MB PSS; FCM wake of a killed app checked (187 ms).
 1b. ✓ **Android completeness (2026-10-10, user's pick):** history (home
    "Recent" + full list; copy again, open, delete, clear), a Devices screen
    (PC online state, rename this phone, remove a device), sharing shortcuts

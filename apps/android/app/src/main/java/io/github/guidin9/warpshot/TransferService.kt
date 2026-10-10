@@ -311,6 +311,26 @@ object Outgoing {
     }
 }
 
+/** Where the core writes received items before they move to MediaStore (`cache/inbox`). */
+object Inbox {
+    private var swept = false
+
+    /**
+     * Partial (`.part`) and unsaved files left by a process that died
+     * mid-receive are removed on first use in a new process, before its own
+     * first receive writes anything (synchronized: a second wake waits).
+     */
+    @Synchronized
+    fun dir(ctx: Context): File {
+        val d = File(ctx.cacheDir, "inbox")
+        if (!swept) {
+            swept = true
+            d.listFiles()?.forEach { it.deleteRecursively() }
+        }
+        return d.apply { mkdirs() }
+    }
+}
+
 /** Handles one wake: receive, then hand the items to the phone (clipboard, gallery, Downloads). */
 object Receiver {
     private const val KIND_TEXT = 1uL
@@ -318,7 +338,7 @@ object Receiver {
 
     suspend fun handle(ctx: Context, env: String, id: Long) {
         val core = Core.get(ctx) ?: return
-        val inbox = File(ctx.cacheDir, "inbox").apply { mkdirs() }
+        val inbox = Inbox.dir(ctx)
         val from = runCatching { core.devices().firstOrNull { !it.me }?.name }.getOrNull()
             ?: ctx.getString(R.string.your_pc)
         Transfers.start(id, incoming = true, peer = from, label = "")

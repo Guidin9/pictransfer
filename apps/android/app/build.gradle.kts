@@ -51,7 +51,11 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8: about half the APK and less code in memory. UniFFI's JNA
+            // bindings use reflection; proguard-rules.pro keeps them.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Personal builds are signed with the debug key until Faz 3 signing.
             signingConfig = signingConfigs.getByName("debug")
         }
