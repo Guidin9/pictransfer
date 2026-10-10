@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { errorCode, onAgentEvent, rpc, type HistoryItem } from "../agent";
 import { Card, Icon } from "../components/ui";
 import { formatSize, locale, t } from "../i18n";
@@ -83,10 +83,11 @@ export function HistoryPage() {
                     formatSize(h.size),
                     fmt.format(h.ts),
                   ].map((part, i) => (
-                    <span className={i > 0 ? "desc-part" : undefined} key={i}>
+                    <Fragment key={i}>
+                      {/* The separator stays outside the no-wrap part: lines break between parts. */}
                       {i > 0 && " · "}
-                      {part}
-                    </span>
+                      <span className={i > 0 ? "desc-part" : undefined}>{part}</span>
+                    </Fragment>
                   ))}
                 </div>
               </div>

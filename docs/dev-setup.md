@@ -115,5 +115,7 @@ Check the state with `(Get-MpComputerStatus).SmartAppControlState`.
 4. Pair: tray icon → Settings → Pair, scan the QR with the app, compare the code.
 
 Agent end-to-end test without a phone: start `npx wrangler dev --local --port 8787`
-in `server\`, build `-p warpshot-agent -p warpshot-ffi --example phone_sim`, then
+in `server\`, run `cargo build -p warpshot-agent` and
+`cargo build -p warpshot-ffi --example phone_sim` (one command with both would
+build only the example), then
 `node scripts\e2e-agent.mjs`.

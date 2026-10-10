@@ -4,7 +4,7 @@
 //! UI; the core does pairing, wake handling and transfers. Errors carry kinds
 //! and codes only — never content, names or addresses.
 
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use tokio::sync::Mutex;
 use warpshot_core::{
@@ -17,7 +17,7 @@ use warpshot_core::{
         flow::{self, PendingSessions, WakeAction},
         manager::EndpointManager,
         store::{Device, now_ms},
-        xfer::{self as nx, OutItem, Policy, Source},
+        xfer::{self as nx, Cancel, OutItem, Policy, Source},
     },
     pair::QrPayload,
     wake::{ReplayCache, WakeError},
@@ -36,9 +36,15 @@ pub enum WarpError {
     Invalid,
     Rejected,
     Offline,
-    Network { code: u32 },
-    Server { code: String },
+    Network {
+        code: u32,
+    },
+    Server {
+        code: String,
+    },
     Keystore,
+    /// Cancelled here ([`Warpshot::cancel_transfer`]) or by the other device.
+    Cancelled,
 }
 
 impl std::fmt::Display for WarpError {
@@ -56,6 +62,7 @@ impl From<NetError> for WarpError {
                 code: c.to_string(),
             },
             NetError::Rejected | NetError::Declined(_) => WarpError::Rejected,
+            NetError::Cancelled => WarpError::Cancelled,
             NetError::Io(_) | NetError::State(_) => WarpError::Storage,
             other => WarpError::Network {
                 code: other.close_code(),
@@ -77,10 +84,20 @@ pub trait PairConfirm: Send + Sync {
     fn confirm(&self, sas: String, peer_name: String, peer_platform: u64) -> bool;
 }
 
-/// Transfer notices for the UI (roadmap 4c; progress will follow). Called on
-/// the runtime's threads; implementations must not block.
+/// Transfer notices for the UI (roadmap 3, 4c). Called on the runtime's
+/// threads; implementations must not block.
 #[uniffi::export(foreign)]
 pub trait TransferObserver: Send + Sync {
+    /// Item-data progress of transfer `transfer` (the id the app passed in):
+    /// once when the items are accepted, then at most 4 per second, and at the end.
+    fn on_progress(
+        &self,
+        transfer: u64,
+        incoming: bool,
+        done_bytes: u64,
+        total_bytes: u64,
+        bytes_per_sec: u64,
+    );
     /// No direct path for a while: the transfer crawls through the relay.
     fn on_slow_route(&self, incoming: bool);
     /// A transfer finished (diagnostics: route kind and duration, no addresses).
@@ -161,7 +178,38 @@ pub struct Warpshot {
     replay: Mutex<ReplayCache>,
     pending: Mutex<PendingSessions>,
     observer: std::sync::Mutex<Option<Arc<dyn TransferObserver>>>,
+    /// Running transfers by the app's id, for [`Warpshot::cancel_transfer`].
+    active: Arc<std::sync::Mutex<HashMap<u64, Cancel>>>,
     rt: tokio::runtime::Runtime,
+}
+
+/// Registers a transfer's cancel handle; unregisters it when dropped.
+struct Tracked {
+    active: Arc<std::sync::Mutex<HashMap<u64, Cancel>>>,
+    id: u64,
+    cancel: Cancel,
+}
+
+impl Tracked {
+    fn new(active: &Arc<std::sync::Mutex<HashMap<u64, Cancel>>>, id: u64) -> Self {
+        let cancel = Cancel::new();
+        if let Ok(mut m) = active.lock() {
+            m.insert(id, cancel.clone());
+        }
+        Self {
+            active: Arc::clone(active),
+            id,
+            cancel,
+        }
+    }
+}
+
+impl Drop for Tracked {
+    fn drop(&mut self) {
+        if let Ok(mut m) = self.active.lock() {
+            m.remove(&self.id);
+        }
+    }
 }
 
 impl std::fmt::Debug for Warpshot {
@@ -173,6 +221,17 @@ impl std::fmt::Debug for Warpshot {
 impl Warpshot {
     fn observer(&self) -> Option<Arc<dyn TransferObserver>> {
         self.observer.lock().ok().and_then(|o| o.clone())
+    }
+
+    /// Wires `s` to the transfer's cancel handle and progress reports.
+    fn instrument(&self, s: &mut nx::Session, t: &Tracked, incoming: bool) {
+        s.cancel_with(&t.cancel);
+        if let Some(o) = self.observer() {
+            let id = t.id;
+            s.on_progress(move |p| {
+                o.on_progress(id, incoming, p.done, p.total, p.bytes_per_sec);
+            });
+        }
     }
 
     /// Runs `work` (one transfer on `conn`) and reports its route to the observer.
@@ -271,6 +330,7 @@ impl Warpshot {
             replay: Mutex::new(ReplayCache::default()),
             pending: Mutex::new(PendingSessions::default()),
             observer: std::sync::Mutex::new(None),
+            active: Arc::default(),
             rt,
         }))
     }
@@ -279,6 +339,23 @@ impl Warpshot {
     pub fn set_observer(&self, observer: Option<Arc<dyn TransferObserver>>) {
         if let Ok(mut o) = self.observer.lock() {
             *o = observer;
+        }
+    }
+
+    /// Cancels the running transfer the app started with id `transfer`; it then
+    /// fails with [`WarpError::Cancelled`]. Returns false if none is running.
+    pub fn cancel_transfer(&self, transfer: u64) -> bool {
+        let c = self
+            .active
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&transfer).cloned());
+        match c {
+            Some(c) => {
+                c.cancel();
+                true
+            }
+            None => false,
         }
     }
 }
@@ -331,22 +408,32 @@ impl Warpshot {
             .map_err(|_| WarpError::Storage)?
     }
 
+    /// `transfer` is the app's id for this transfer (progress, cancel).
     pub async fn handle_wake(
         self: Arc<Self>,
         envelope_b64u: String,
         inbox_dir: String,
+        transfer: u64,
     ) -> Result<Vec<ReceivedItem>, WarpError> {
         let this = Arc::clone(&self);
         self.rt
-            .spawn(async move { this.handle_wake_impl(envelope_b64u, inbox_dir).await })
+            .spawn(async move {
+                this.handle_wake_impl(envelope_b64u, inbox_dir, transfer)
+                    .await
+            })
             .await
             .map_err(|_| WarpError::Storage)?
     }
 
-    pub async fn send_text(self: Arc<Self>, target: String, text: String) -> Result<(), WarpError> {
+    pub async fn send_text(
+        self: Arc<Self>,
+        target: String,
+        text: String,
+        transfer: u64,
+    ) -> Result<(), WarpError> {
         let this = Arc::clone(&self);
         self.rt
-            .spawn(async move { this.send_text_impl(target, text).await })
+            .spawn(async move { this.send_text_impl(target, text, transfer).await })
             .await
             .map_err(|_| WarpError::Storage)?
     }
@@ -355,10 +442,11 @@ impl Warpshot {
         self: Arc<Self>,
         target: String,
         files: Vec<OutgoingFile>,
+        transfer: u64,
     ) -> Result<(), WarpError> {
         let this = Arc::clone(&self);
         self.rt
-            .spawn(async move { this.send_files_impl(target, files).await })
+            .spawn(async move { this.send_files_impl(target, files, transfer).await })
             .await
             .map_err(|_| WarpError::Storage)?
     }
@@ -453,6 +541,7 @@ impl Warpshot {
         &self,
         envelope_b64u: String,
         inbox_dir: String,
+        transfer: u64,
     ) -> Result<Vec<ReceivedItem>, WarpError> {
         let env = b64u::decode(&envelope_b64u).ok_or(WarpError::Invalid)?;
         let mut synced = false;
@@ -477,6 +566,7 @@ impl Warpshot {
                 Ok(vec![])
             }
             WakeAction::Connect { session, dial, .. } => {
+                let t = Tracked::new(&self.active, transfer);
                 let (ep, _lease) = self.mgr.acquire().await?;
                 let log = self
                     .dev
@@ -486,7 +576,11 @@ impl Warpshot {
                     .clone()
                     .ok_or(WarpError::NotPaired)?;
                 let mut log = log;
-                let mut s = flow::answer_connect(&ep, &log, &sender, session, &dial).await?;
+                let mut s = tokio::select! {
+                    r = flow::answer_connect(&ep, &log, &sender, session, &dial) => r?,
+                    () = t.cancel.cancelled() => return Err(WarpError::Cancelled),
+                };
+                self.instrument(&mut s, &t, true);
                 // §8.5: both peers run the log sync step before any transfer.
                 self.sync_session(&mut s, &mut log).await?;
                 let policy = Policy {
@@ -515,9 +609,14 @@ impl Warpshot {
     }
 
     /// Sends text to a device: wake it, then wait for it to dial in (§7.4).
-    async fn send_text_impl(&self, target: String, text: String) -> Result<(), WarpError> {
+    async fn send_text_impl(
+        &self,
+        target: String,
+        text: String,
+        transfer: u64,
+    ) -> Result<(), WarpError> {
         let item = nx::text_item(1, &text, now_ms())?;
-        self.send(target, vec![item]).await
+        self.send(target, vec![item], transfer).await
     }
 
     /// Sends files (from the share sheet, copied to app storage by Kotlin).
@@ -525,6 +624,7 @@ impl Warpshot {
         &self,
         target: String,
         files: Vec<OutgoingFile>,
+        transfer: u64,
     ) -> Result<(), WarpError> {
         let mut items = Vec::with_capacity(files.len());
         for (i, f) in files.iter().enumerate() {
@@ -533,7 +633,7 @@ impl Warpshot {
                 .saturating_add(1);
             items.push(nx::file_item(id, std::path::Path::new(&f.path), now_ms())?);
         }
-        self.send(target, items).await
+        self.send(target, items, transfer).await
     }
 
     /// Fetches membership changes from the server.
@@ -543,13 +643,19 @@ impl Warpshot {
 }
 
 impl Warpshot {
-    async fn send(&self, target: String, items: Vec<OutItem>) -> Result<(), WarpError> {
+    async fn send(
+        &self,
+        target: String,
+        items: Vec<OutItem>,
+        transfer: u64,
+    ) -> Result<(), WarpError> {
         let target = parse_id(&target)?;
         if items.is_empty() || items.iter().any(|o| matches!(o.source, Source::Bytes(_))) {
             return Err(WarpError::Invalid);
         }
+        let t = Tracked::new(&self.active, transfer);
         let (ep, _lease) = self.mgr.acquire().await?;
-        let (env, gid, log) = {
+        let (env, gid, log, session) = {
             let dev = self.dev.lock().await;
             let gid = dev.group_id().ok_or(WarpError::NotPaired)?;
             let session = self.pending.lock().await.insert(target, items.clone())?;
@@ -557,6 +663,7 @@ impl Warpshot {
                 flow::connect_wake(&ep, &dev, &target, session, &items, now_ms())?,
                 gid,
                 dev.log.clone().ok_or(WarpError::NotPaired)?,
+                session,
             )
         };
         let via = self
@@ -574,10 +681,15 @@ impl Warpshot {
             .checked_add(flow::PENDING_TTL)
             .ok_or(WarpError::Invalid)?;
         loop {
-            let inc = tokio::time::timeout_at(deadline, ep.accept())
-                .await
-                .map_err(|_| WarpError::Offline)?
-                .ok_or(WarpError::Offline)?;
+            let inc = tokio::select! {
+                r = tokio::time::timeout_at(deadline, ep.accept()) => {
+                    r.map_err(|_| WarpError::Offline)?.ok_or(WarpError::Offline)?
+                }
+                () = t.cancel.cancelled() => {
+                    self.pending.lock().await.take(&session, &target);
+                    return Err(WarpError::Cancelled);
+                }
+            };
             let Ok(acc) = inc.accept() else { continue };
             let Ok(conn) = acc.await else { continue };
             if conn.alpn() != warpshot_core::xfer::ALPN {
@@ -589,6 +701,7 @@ impl Warpshot {
                 net::close(&s.conn, warpshot_core::xfer::code::PROTOCOL);
                 continue;
             };
+            self.instrument(&mut s, &t, false);
             // §8.5: both peers run the log sync step before any transfer.
             let mut synced = log.clone();
             self.sync_session(&mut s, &mut synced).await?;

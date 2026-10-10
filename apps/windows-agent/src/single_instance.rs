@@ -28,7 +28,11 @@ pub enum Instance {
 
 /// The agent's mutex name for the current user.
 pub fn mutex_name() -> io::Result<String> {
-    Ok(format!(r"Local\warpshot-agent-{}", current_user_sid()?))
+    Ok(format!(
+        r"Local\warpshot-agent-{}{}",
+        current_user_sid()?,
+        crate::instance_suffix()
+    ))
 }
 
 /// Acquires the agent's single-instance mutex.

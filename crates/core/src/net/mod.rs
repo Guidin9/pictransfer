@@ -50,6 +50,8 @@ pub enum NetError {
     Server(crate::client::ClientError),
     /// The server's head moved; fetch, re-check and retry (§4.4).
     HeadMoved,
+    /// The transfer was cancelled, by us or by the peer (§8.4).
+    Cancelled,
 }
 
 impl NetError {
@@ -64,6 +66,7 @@ impl NetError {
             NetError::Pair(_) => code::PAIR_PROOF,
             NetError::Rejected => code::PAIR_REJECTED,
             NetError::Closed(c) => *c,
+            NetError::Cancelled => code::CANCELLED,
             _ => code::PROTOCOL,
         }
     }
@@ -209,8 +212,12 @@ pub fn remote_id(conn: &Connection) -> EndpointId {
     EndpointId(*conn.remote_id().as_bytes())
 }
 
+/// Closes `conn` with an application code, unless it is already closed: a
+/// second close would replace the peer's code (e.g. `CANCELLED`) with ours.
 pub fn close(conn: &Connection, code: u32) {
-    conn.close(VarInt::from_u32(code), b"");
+    if conn.close_reason().is_none() {
+        conn.close(VarInt::from_u32(code), b"");
+    }
 }
 
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);

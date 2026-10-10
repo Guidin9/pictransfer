@@ -7,13 +7,13 @@
 //! addresses or keys.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde_json::{Map, Value, json};
@@ -29,7 +29,7 @@ use warpshot_core::{
         manager::EndpointManager,
         pair::PeerSummary,
         store::{Device, now_ms, write_atomic},
-        xfer::{self as nx, OutItem, Policy, Received, Source},
+        xfer::{self as nx, Cancel, OutItem, Policy, Progress, Received, Source},
     },
     pair::{PairError, Window},
     wake::{ReplayCache, WakeError},
@@ -43,7 +43,7 @@ use crate::{
     osd,
     pipe::{self, RpcError},
     power,
-    tray::{DeviceItem, MenuModel},
+    tray::{DeviceItem, MenuModel, TransferItem},
 };
 
 /// Work for the UI thread.
@@ -66,6 +66,8 @@ pub enum UiMsg {
         text: String,
         tone: osd::Tone,
     },
+    /// The running transfers changed (tray menu and tooltip).
+    Transfers(Vec<TransferItem>),
 }
 
 /// Where a send was started; hotkey sends report through the flyout.
@@ -80,6 +82,8 @@ pub enum Origin {
 pub enum Cmd {
     SendClip(ClipContent),
     SetDefaultIndex(usize),
+    /// Cancel a running transfer (tray menu).
+    Cancel(u64),
 }
 
 pub type UiSink = Box<dyn Fn(UiMsg) + Send + Sync>;
@@ -139,6 +143,7 @@ fn net_code(e: &NetError) -> &'static str {
         NetError::Server(_) | NetError::HeadMoved => "server",
         NetError::Identity => "not-member",
         NetError::TooLarge => "too-large",
+        NetError::Cancelled => "cancelled",
         _ => "network",
     }
 }
@@ -264,11 +269,82 @@ pub struct Service {
     route_direct: AtomicU64,
     route_relay_only: AtomicU64,
     route_slow: AtomicU64,
+    active: std::sync::Mutex<BTreeMap<u64, Active>>,
+    tray_at: std::sync::Mutex<Option<Instant>>,
 }
 
 impl std::fmt::Debug for Service {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Service")
+    }
+}
+
+/// A running transfer (roadmap 3 + 4b): what the UI and the tray show, and
+/// the handle that cancels it.
+#[derive(Debug)]
+struct Active {
+    /// "in" or "out".
+    direction: &'static str,
+    peer: String,
+    /// The first item's name, "" for text or when unknown (incoming, before the offer).
+    label: String,
+    items: u64,
+    /// `None` while waiting for the peer (wake answer, queue).
+    progress: Option<Progress>,
+    cancel: Cancel,
+    started_ms: u64,
+}
+
+impl Active {
+    fn json(&self, n: u64) -> Value {
+        let p = self.progress;
+        json!({
+            "transfer": n.to_string(),
+            "direction": self.direction,
+            "peer": self.peer,
+            "label": self.label,
+            "items": self.items,
+            "state": if p.is_some() { "running" } else { "waiting" },
+            "done_bytes": p.map_or(0, |p| p.done),
+            "total_bytes": p.map_or(0, |p| p.total),
+            "bytes_per_sec": p.map_or(0, |p| p.bytes_per_sec),
+            "started_ms": self.started_ms,
+        })
+    }
+
+    fn tray_text(&self) -> String {
+        let what = match (self.direction, self.label.as_str()) {
+            ("in", _) => format!("Receiving from {}", self.peer),
+            (_, "") => format!("Sending to {}", self.peer),
+            (_, l) => format!("Sending {l} to {}", self.peer),
+        };
+        match self.progress {
+            Some(p) if p.total > 0 => {
+                let pct = p.done.saturating_mul(100).checked_div(p.total).unwrap_or(0);
+                format!("{what}: {pct} %")
+            }
+            Some(_) => what,
+            None => format!("{what} (waiting)"),
+        }
+    }
+}
+
+/// The tray tooltip shows progress; it is refreshed at most this often.
+const TRAY_EVERY: Duration = Duration::from_secs(1);
+
+/// What a transfer list entry calls its items.
+fn items_label(items: &[OutItem]) -> String {
+    let first = items
+        .first()
+        .map(|o| match o.item.kind {
+            wx::kind::TEXT => String::new(),
+            _ => o.item.name.clone(),
+        })
+        .unwrap_or_default();
+    match items.len() {
+        0 | 1 => first,
+        n if first.is_empty() => format!("{n} items"),
+        n => format!("{first} +{}", n.saturating_sub(1)),
     }
 }
 
@@ -344,6 +420,8 @@ impl Service {
             route_direct: AtomicU64::new(0),
             route_relay_only: AtomicU64::new(0),
             route_slow: AtomicU64::new(0),
+            active: std::sync::Mutex::new(BTreeMap::new()),
+            tray_at: std::sync::Mutex::new(None),
         }))
     }
 
@@ -363,9 +441,10 @@ impl Service {
             Cmd::SendClip(c) => match clip_items(c) {
                 Ok(items) => {
                     let this = Arc::clone(self);
-                    tokio::spawn(
-                        async move { this.send_and_report(None, items, Origin::Hotkey).await },
-                    );
+                    let n = self.next_transfer.fetch_add(1, Ordering::Relaxed);
+                    tokio::spawn(async move {
+                        this.send_and_report(n, None, items, Origin::Hotkey).await
+                    });
                 }
                 Err(code) => {
                     let body = format!("The clipboard can't be sent ({code}).");
@@ -380,7 +459,87 @@ impl Service {
                     self.refresh_menu().await;
                 }
             }
+            Cmd::Cancel(n) => {
+                self.cancel_transfer(n);
+            }
         }
+    }
+
+    // ------------------------------------------------------------ active transfers
+
+    /// Registers transfer `n` and announces it; returns its cancel handle.
+    fn track(
+        &self,
+        n: u64,
+        direction: &'static str,
+        peer: String,
+        label: String,
+        items: u64,
+    ) -> Cancel {
+        let a = Active {
+            direction,
+            peer,
+            label,
+            items,
+            progress: None,
+            cancel: Cancel::new(),
+            started_ms: now_ms(),
+        };
+        let cancel = a.cancel.clone();
+        self.emit("transfer.started", a.json(n));
+        lk(&self.active).insert(n, a);
+        self.push_tray(true);
+        cancel
+    }
+
+    /// Progress of transfer `n` (at most 4 per second, from the core).
+    fn on_progress(&self, n: u64, p: Progress) {
+        if let Some(a) = lk(&self.active).get_mut(&n) {
+            a.progress = Some(p);
+        }
+        self.emit(
+            "transfer.progress",
+            json!({
+                "transfer": n.to_string(), "done_bytes": p.done,
+                "total_bytes": p.total, "bytes_per_sec": p.bytes_per_sec,
+            }),
+        );
+        self.push_tray(false);
+    }
+
+    fn untrack(&self, n: u64) {
+        lk(&self.active).remove(&n);
+        self.push_tray(true);
+    }
+
+    fn cancel_transfer(&self, n: u64) -> bool {
+        match lk(&self.active).get(&n) {
+            Some(a) => {
+                a.cancel.cancel();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Sends the running transfers to the tray; progress-only updates are
+    /// rate-limited to [`TRAY_EVERY`].
+    fn push_tray(&self, force: bool) {
+        {
+            let mut at = lk(&self.tray_at);
+            if !force && at.is_some_and(|t| t.elapsed() < TRAY_EVERY) {
+                return;
+            }
+            *at = Some(Instant::now());
+        }
+        let list = lk(&self.active)
+            .iter()
+            .map(|(n, a)| TransferItem {
+                id: *n,
+                text: a.tray_text(),
+            })
+            .collect();
+        (self.ui)(UiMsg::Transfers(list));
     }
 
     // ------------------------------------------------------------ helpers
@@ -519,6 +678,8 @@ impl Service {
                 .iter()
                 .position(|(id, _)| hex(&id.0) == def)
                 .or(if others.is_empty() { None } else { Some(0) }),
+            // Kept by the UI thread from `UiMsg::Transfers`.
+            transfers: Vec::new(),
         };
         (self.ui)(UiMsg::Menu(model));
     }
@@ -729,14 +890,29 @@ impl Service {
             WakeAction::GroupChanged => {
                 let _ = self.pull_log().await;
             }
-            WakeAction::Connect { session, dial, .. } => {
-                let res = self.receive(sender, session, dial).await;
-                if let Err(e) = res {
-                    self.toast(
+            WakeAction::Connect {
+                session,
+                dial,
+                preview,
+                ..
+            } => {
+                let n = self.next_transfer.fetch_add(1, Ordering::Relaxed);
+                let items = preview.map_or(0, |p| p.count);
+                let res = self.receive(n, sender, session, dial, items).await;
+                self.untrack(n);
+                let code = res.as_ref().err().map(net_code);
+                match &res {
+                    Ok(()) | Err(NetError::Cancelled) => {}
+                    Err(e) => self.toast(
                         "Transfer failed",
-                        &format!("Couldn't receive ({}).", net_code(&e)),
-                    );
+                        &format!("Couldn't receive ({}).", net_code(e)),
+                    ),
                 }
+                self.emit(
+                    "transfer.done",
+                    json!({"transfer": n.to_string(), "ok": res.is_ok(), "code": code}),
+                );
+                power::trim_working_set();
             }
         }
     }
@@ -756,11 +932,12 @@ impl Service {
 
     async fn receive(
         self: &Arc<Self>,
+        n: u64,
         sender: EndpointId,
         session: [u8; 16],
         dial: warpshot_core::wake::DialInfo,
+        items: u64,
     ) -> Result<(), NetError> {
-        let (ep, _lease) = self.mgr.acquire().await?;
         let mut log = self
             .dev
             .lock()
@@ -768,7 +945,20 @@ impl Service {
             .log
             .clone()
             .ok_or(NetError::State("not paired"))?;
-        let mut s = flow::answer_connect(&ep, &log, &sender, session, &dial).await?;
+        let peer_name = log
+            .members()
+            .get(&sender)
+            .map(|d| d.name.clone())
+            .unwrap_or_else(|| "your device".into());
+        let cancel = self.track(n, "in", peer_name.clone(), String::new(), items);
+        let (ep, _lease) = self.mgr.acquire().await?;
+        let mut s = tokio::select! {
+            r = flow::answer_connect(&ep, &log, &sender, session, &dial) => r?,
+            () = cancel.cancelled() => return Err(NetError::Cancelled),
+        };
+        s.cancel_with(&cancel);
+        let this = Arc::clone(self);
+        s.on_progress(move |p| this.on_progress(n, p));
         if s.sync_logs(&mut log, now_ms()).await? {
             let mut dev = self.dev.lock().await;
             dev.log = Some(log.clone());
@@ -793,11 +983,6 @@ impl Service {
         .await;
         self.count_route(route);
         let items = items?;
-        let peer_name = log
-            .members()
-            .get(&sender)
-            .map(|d| d.name.clone())
-            .unwrap_or_else(|| "your device".into());
         self.on_received(&sender, &peer_name, items).await;
         Ok(())
     }
@@ -885,12 +1070,6 @@ impl Service {
             }
         }
         self.emit("history.changed", json!({}));
-        let n = self.next_transfer.fetch_add(1, Ordering::Relaxed);
-        self.emit(
-            "transfer.done",
-            json!({"transfer": n.to_string(), "ok": true}),
-        );
-        power::trim_working_set();
     }
 
     // ------------------------------------------------------------ send
@@ -920,14 +1099,16 @@ impl Service {
             .ok_or("not-paired")
     }
 
+    /// Runs send `n` (allocated from `next_transfer` by the caller) and reports it.
     async fn send_and_report(
         self: &Arc<Self>,
+        n: u64,
         target: Option<String>,
         items: Vec<OutItem>,
         origin: Origin,
     ) -> bool {
-        let n = self.next_transfer.fetch_add(1, Ordering::Relaxed);
-        let res = self.send(target.as_deref(), items).await;
+        let res = self.send(n, target.as_deref(), items).await;
+        self.untrack(n);
         let (ok, code) = match &res {
             Ok(_) => (true, None),
             Err(c) => (false, Some(c.clone())),
@@ -951,6 +1132,12 @@ impl Service {
                 match origin {
                     Origin::Hotkey => self.flyout(&format!("Sent to {name}"), osd::Tone::Ok),
                     Origin::Ui => self.toast("Sent", &format!("Sent to {name}.")),
+                }
+            }
+            // Cancelled here (tray, UI) or on the other device: nothing to report.
+            Err(c) if c == "cancelled" => {
+                if origin == Origin::Hotkey {
+                    self.flyout("Cancelled", osd::Tone::Error);
                 }
             }
             Err(c) => {
@@ -982,13 +1169,26 @@ impl Service {
     /// Sends items: wake the target, then wait for it to dial in (§7.4). Returns the target.
     async fn send(
         self: &Arc<Self>,
+        n: u64,
         target: Option<&str>,
         items: Vec<OutItem>,
     ) -> Result<EndpointId, String> {
-        let _one_at_a_time = self.send_lock.lock().await;
         let target = self.resolve_target(target).await?;
+        let peer_name = self
+            .others()
+            .await
+            .into_iter()
+            .find(|(id, _)| *id == target)
+            .map(|(_, (name, _))| name)
+            .unwrap_or_else(|| "your device".into());
+        let cancel = self.track(n, "out", peer_name, items_label(&items), items.len() as u64);
+        // Queued behind another send: still cancellable.
+        let _one_at_a_time = tokio::select! {
+            g = self.send_lock.lock() => g,
+            () = cancel.cancelled() => return Err("cancelled".into()),
+        };
         let (ep, _lease) = self.mgr.acquire().await.map_err(|e| net_code(&e))?;
-        let (env, log) = {
+        let (env, log, session) = {
             let dev = self.dev.lock().await;
             let session = self
                 .pending
@@ -1000,6 +1200,7 @@ impl Service {
                 flow::connect_wake(&ep, &dev, &target, session, &items, now_ms())
                     .map_err(|e| net_code(&e))?,
                 dev.log.clone().ok_or("not-paired")?,
+                session,
             )
         };
         let via = self.wake(&target, &env).await?;
@@ -1010,10 +1211,16 @@ impl Service {
             .checked_add(flow::PENDING_TTL)
             .ok_or("time")?;
         loop {
-            let inc = tokio::time::timeout_at(deadline, ep.accept())
-                .await
-                .map_err(|_| "no-answer")?
-                .ok_or("no-answer")?;
+            let inc = tokio::select! {
+                r = tokio::time::timeout_at(deadline, ep.accept()) => {
+                    r.map_err(|_| "no-answer")?.ok_or("no-answer")?
+                }
+                () = cancel.cancelled() => {
+                    // The woken device may still dial in; it finds no session.
+                    self.pending.lock().await.take(&session, &target);
+                    return Err("cancelled".into());
+                }
+            };
             let Ok(acc) = inc.accept() else { continue };
             let Ok(conn) = acc.await else { continue };
             if conn.alpn() != wx::ALPN {
@@ -1027,6 +1234,9 @@ impl Service {
                 net::close(&s.conn, wx::code::PROTOCOL);
                 continue;
             };
+            s.cancel_with(&cancel);
+            let this = Arc::clone(self);
+            s.on_progress(move |p| this.on_progress(n, p));
             // §8.5: both peers run the log sync step before any transfer.
             let mut synced = log.clone();
             if s.sync_logs(&mut synced, now_ms())
@@ -1421,10 +1631,26 @@ impl Service {
                     clip_items(ClipContent::Files(paths)).map_err(fail)?
                 };
                 let target = s("target").map(str::to_owned);
-                let n = self.next_transfer.load(Ordering::Relaxed);
+                let n = self.next_transfer.fetch_add(1, Ordering::Relaxed);
                 let this = Arc::clone(self);
-                tokio::spawn(async move { this.send_and_report(target, items, Origin::Ui).await });
+                tokio::spawn(
+                    async move { this.send_and_report(n, target, items, Origin::Ui).await },
+                );
                 Ok(json!({"transfer": n.to_string()}))
+            }
+            "transfer.list" => {
+                let list: Vec<Value> = lk(&self.active).iter().map(|(n, a)| a.json(*n)).collect();
+                Ok(json!({"transfers": list}))
+            }
+            "transfer.cancel" => {
+                let n = s("transfer")
+                    .and_then(|t| t.parse::<u64>().ok())
+                    .ok_or_else(|| bad("transfer"))?;
+                if self.cancel_transfer(n) {
+                    Ok(json!({}))
+                } else {
+                    Err(fail("not-found"))
+                }
             }
             "debug.counters" => {
                 let c = self

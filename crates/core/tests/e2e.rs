@@ -464,3 +464,198 @@ async fn wake_driven_transfer() {
     ep_pc.close().await;
     ep_phone.close().await;
 }
+
+/// Waits until `dir` holds a `.part` file (a stream is mid-flight). Sizes in
+/// a Windows directory listing lag behind open files, so only the name counts.
+async fn part_appears(dir: &std::path::Path) {
+    let wait = async {
+        loop {
+            let busy = std::fs::read_dir(dir)
+                .unwrap()
+                .any(|e| e.unwrap().file_name().to_string_lossy().ends_with(".part"));
+            if busy {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(20), wait)
+        .await
+        .expect("no .part file appeared");
+}
+
+fn dir_is_empty(dir: &std::path::Path) -> bool {
+    std::fs::read_dir(dir).unwrap().next().is_none()
+}
+
+fn big_item(id: u32, len: usize) -> OutItem {
+    let data: Vec<u8> = (0..len).map(|i| (i % 251) as u8).collect();
+    OutItem {
+        item: Item {
+            id,
+            kind: kind::FILE,
+            name: "video.mp4".into(),
+            mime: "video/mp4".into(),
+            size: len as u64,
+            created_at: 0,
+            text: None,
+        },
+        source: Source::Bytes(data),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn progress_and_cancel() {
+    use std::sync::{Arc, Mutex};
+    use warpshot_core::net::xfer::{Cancel, Progress};
+
+    let mut pc = Device::new("pc", platform::WINDOWS).unwrap();
+    let mut phone = Device::new("phone", platform::ANDROID).unwrap();
+    let (d, s) = pair_once(&pc, &phone).await;
+    pc.log = Some(d.unwrap().log);
+    phone.log = Some(s.unwrap().log);
+    let ep_pc = net::bind(&pc.keys.ik, Relay::Disabled).await.unwrap();
+    let ep_phone = net::bind(&phone.keys.ik, Relay::Disabled).await.unwrap();
+    let pc_log = pc.log.clone().unwrap();
+    let phone_log = phone.log.clone().unwrap();
+    let pc_addr = net::dial_info(&ep_pc);
+
+    // One phone → PC transfer; each side may get a progress sink and a cancel handle.
+    let run = |items: Vec<OutItem>,
+               dir: PathBuf,
+               send_obs: Option<(Arc<Mutex<Vec<Progress>>>, Cancel)>,
+               recv_obs: Option<(Arc<Mutex<Vec<Progress>>>, Cancel)>| {
+        let (ep_pc, ep_phone, pc_log, phone_log, pc_addr, pc_id) = (
+            ep_pc.clone(),
+            ep_phone.clone(),
+            pc_log.clone(),
+            phone_log.clone(),
+            pc_addr.clone(),
+            pc.id(),
+        );
+        async move {
+            let policy = Policy {
+                dir,
+                max_size: 1 << 30,
+                accept_large: false,
+            };
+            tokio::join!(
+                async {
+                    let conn = accept_conn(&ep_pc).await;
+                    let mut s = nx::accept(&ep_pc, conn, &pc_log).await.unwrap();
+                    if let Some((log, c)) = recv_obs {
+                        s.on_progress(move |p| log.lock().unwrap().push(p));
+                        s.cancel_with(&c);
+                    }
+                    s.receive(&policy, |_| true).await
+                },
+                async {
+                    let mut s = nx::dial(&ep_phone, &phone_log, &pc_id, &pc_addr, [0; 16])
+                        .await
+                        .unwrap();
+                    if let Some((log, c)) = send_obs {
+                        s.on_progress(move |p| log.lock().unwrap().push(p));
+                        s.cancel_with(&c);
+                    }
+                    s.send_items(items).await
+                }
+            )
+        }
+    };
+
+    // --- 1. A complete transfer reports 0 → total on both sides, monotonic.
+    let dir = tmpdir("progress");
+    let (tx, rx) = (Arc::default(), Arc::default());
+    let items = vec![
+        nx::text_item(1, "kısa not", now_ms()).unwrap(),
+        big_item(2, 3 << 20),
+        big_item(3, 100_000),
+    ];
+    let total = (3u64 << 20) + 100_000;
+    let (r, s) = run(
+        items,
+        dir.clone(),
+        Some((Arc::clone(&tx), Cancel::new())),
+        Some((Arc::clone(&rx), Cancel::new())),
+    )
+    .await;
+    assert_eq!(s.unwrap(), vec![(1, true), (2, true), (3, true)]);
+    assert_eq!(r.unwrap().len(), 3);
+    for log in [tx, rx] {
+        let log: Vec<Progress> = log.lock().unwrap().clone();
+        let first = log.first().unwrap();
+        let last = log.last().unwrap();
+        assert_eq!((first.done, first.total), (0, total));
+        assert_eq!((last.done, last.total), (total, total));
+        assert!(log.windows(2).all(|w| w[0].done <= w[1].done));
+    }
+
+    // --- 2. The receiver cancels mid-stream: both sides end `Cancelled`, the
+    // partial file is deleted and nothing is saved.
+    let dir = tmpdir("cancel-recv");
+    let cancel = Cancel::new();
+    let watcher = {
+        let (dir, cancel) = (dir.clone(), cancel.clone());
+        async move {
+            part_appears(&dir).await;
+            cancel.cancel();
+        }
+    };
+    let ((r, s), ()) = tokio::join!(
+        run(
+            vec![big_item(1, 64 << 20)],
+            dir.clone(),
+            None,
+            Some((Arc::default(), cancel)),
+        ),
+        watcher
+    );
+    assert_eq!(r.unwrap_err(), net::NetError::Cancelled);
+    assert_eq!(s.unwrap_err(), net::NetError::Cancelled);
+    assert!(dir_is_empty(&dir), "no partial or final file");
+
+    // --- 3. The sender cancels mid-stream: same outcome.
+    let dir = tmpdir("cancel-send");
+    let cancel = Cancel::new();
+    let watcher = {
+        let (dir, cancel) = (dir.clone(), cancel.clone());
+        async move {
+            part_appears(&dir).await;
+            cancel.cancel();
+        }
+    };
+    let ((r, s), ()) = tokio::join!(
+        run(
+            vec![big_item(1, 64 << 20)],
+            dir.clone(),
+            Some((Arc::default(), cancel)),
+            None,
+        ),
+        watcher
+    );
+    assert_eq!(s.unwrap_err(), net::NetError::Cancelled);
+    assert_eq!(r.unwrap_err(), net::NetError::Cancelled);
+    assert!(dir_is_empty(&dir), "no partial or final file");
+
+    // --- 4. A handle cancelled before the session exists: `cancelled()`
+    // resolves, and attaching it closes the connection at once.
+    let cancel = Cancel::new();
+    cancel.cancel();
+    tokio::time::timeout(std::time::Duration::from_secs(1), cancel.cancelled())
+        .await
+        .unwrap();
+    let dir = tmpdir("cancel-early");
+    let (r, s) = run(
+        vec![big_item(1, 1000)],
+        dir.clone(),
+        Some((Arc::default(), cancel)),
+        None,
+    )
+    .await;
+    assert_eq!(s.unwrap_err(), net::NetError::Cancelled);
+    assert!(r.is_err());
+    assert!(dir_is_empty(&dir));
+
+    ep_pc.close().await;
+    ep_phone.close().await;
+}

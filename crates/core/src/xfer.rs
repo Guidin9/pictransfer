@@ -46,6 +46,8 @@ pub mod code {
     pub const DECLINED: u32 = 0x30;
     pub const TOO_LARGE: u32 = 0x31;
     pub const BUSY: u32 = 0x32;
+    /// Either side cancelled the transfer (§8.4 "Cancellation").
+    pub const CANCELLED: u32 = 0x33;
     pub const DIRECT_UNAVAILABLE: u32 = 0x40;
     pub const TIMEOUT: u32 = 0x50;
     pub const INTERNAL: u32 = 0x7f;

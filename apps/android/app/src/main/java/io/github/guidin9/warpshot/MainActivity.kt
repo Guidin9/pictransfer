@@ -161,7 +161,7 @@ fun MainScreen() {
                     status = "Sending…"
                     scope.launch {
                         status = try {
-                            core.sendText(target, text)
+                            core.sendText(target, text, Transfers.newId().toULong())
                             text = ""
                             "Sent to ${pcs.first().name}."
                         } catch (e: Exception) {

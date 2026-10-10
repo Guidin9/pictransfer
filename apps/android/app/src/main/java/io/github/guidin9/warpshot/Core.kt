@@ -70,10 +70,14 @@ class AndroidKeystore : PlatformKeystore {
 }
 
 /**
- * Transfer route notices from the core (roadmap 4c): tells the user when a
- * transfer crawls through the relay. Logs carry kinds and timings only.
+ * Transfer notices from the core, on its threads (must not block): progress
+ * into [Transfers] (roadmap 3), and a notice when a transfer crawls through
+ * the relay (roadmap 4c). Logs carry kinds and timings only.
  */
-class RouteObserver(private val ctx: Context) : TransferObserver {
+class CoreObserver(private val ctx: Context) : TransferObserver {
+    override fun onProgress(transfer: ULong, incoming: Boolean, doneBytes: ULong, totalBytes: ULong, bytesPerSec: ULong) =
+        Transfers.progress(transfer.toLong(), doneBytes.toLong(), totalBytes.toLong(), bytesPerSec.toLong())
+
     override fun onSlowRoute(incoming: Boolean) = Notifier.slowRoute(ctx)
 
     override fun onRoute(incoming: Boolean, everDirect: Boolean, slow: Boolean, durationMs: ULong) {
@@ -117,7 +121,7 @@ object Core {
         ensureJni(ctx)
         val dir = ctx.filesDir.resolve("core").apply { mkdirs() }
         val w = Warpshot.open(dir.path, deviceName(ctx), url, AndroidKeystore())
-        w.setObserver(RouteObserver(ctx.applicationContext))
+        w.setObserver(CoreObserver(ctx.applicationContext))
         instance = w
         return w
     }
@@ -136,6 +140,7 @@ object Core {
 }
 
 fun errorText(e: Throwable): String = when (e) {
+    is WarpException.Cancelled -> "Cancelled."
     is WarpException.Offline -> "Your PC is offline."
     is WarpException.NotPaired -> "Pair with your PC first."
     is WarpException.Rejected -> "The PC refused the transfer."

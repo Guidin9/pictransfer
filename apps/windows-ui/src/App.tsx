@@ -4,6 +4,7 @@ import { Icon } from "./components/ui";
 import { platformName, t, type Key } from "./i18n";
 import { DevicesPage } from "./screens/Devices";
 import { HistoryPage } from "./screens/History";
+import { ActiveTransfers } from "./components/ActiveTransfers";
 import { PairingPage, usePairing } from "./screens/Pairing";
 import { SettingsPage } from "./screens/Settings";
 
@@ -170,6 +171,9 @@ export function App() {
             </div>
           </div>
         ))}
+        <div className="page active-transfers">
+          <ActiveTransfers />
+        </div>
         {page === "pairing" && <PairingPage pairing={pairing} />}
         {page === "devices" && <DevicesPage />}
         {page === "settings" && <SettingsPage />}

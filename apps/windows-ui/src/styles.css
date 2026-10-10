@@ -405,6 +405,63 @@ p {
   }
 }
 
+/* ---------- transfers in progress ---------- */
+.active-transfers:empty {
+  display: none;
+}
+
+.active-transfers {
+  margin-bottom: 24px;
+}
+
+.active-transfers h2.section {
+  margin-top: 0;
+}
+
+.progress {
+  position: relative;
+  height: 4px;
+  margin-top: 8px;
+  border-radius: 2px;
+  background: var(--stroke-strong);
+  overflow: hidden;
+}
+
+.progress > div {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 0.25s linear;
+}
+
+.progress.indeterminate > div {
+  position: absolute;
+  width: 30%;
+  animation: progress-slide 1.4s ease-in-out infinite;
+}
+
+@keyframes progress-slide {
+  from {
+    left: -30%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress > div {
+    transition: none;
+  }
+
+  .progress.indeterminate > div {
+    animation: none;
+    left: 0;
+    width: 100%;
+    opacity: 0.4;
+  }
+}
+
 .row.history.failed .row-title {
   color: var(--text-2);
 }

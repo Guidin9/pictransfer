@@ -20,6 +20,7 @@ import android.net.Uri
 import android.os.Environment
 import android.os.IBinder
 import android.provider.MediaStore
+import android.text.format.Formatter
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
@@ -30,14 +31,18 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import uniffi.warpshot_ffi.OutgoingFile
 import uniffi.warpshot_ffi.WarpException
 
 /**
- * Foreground service (dataSync) started from a high-priority FCM message: dials
- * the PC that woke us and receives the items (architecture A3).
+ * Foreground service (dataSync) for every transfer: receives what the PC woke
+ * us for (architecture A3) and sends what the share sheet handed over, so a
+ * long send keeps going after the share card is gone. Its notification shows
+ * progress with a Cancel action (roadmap 3 + 4b).
  */
 class TransferService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -45,30 +50,72 @@ class TransferService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        // The ongoing notification follows the transfers, at most about once a
+        // second (Android drops faster updates of one notification).
+        scope.launch {
+            Transfers.state.collect {
+                refresh()
+                delay(1000)
+            }
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Notifier.channels(this)
         ServiceCompat.startForeground(
             this,
             Notifier.PROGRESS_ID,
-            Notifier.progress(this),
+            Notifier.ongoingNotification(this),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
         )
-        val env = intent?.getStringExtra(EXTRA_ENV)
-        if (env == null) {
-            if (active.get() == 0) stop()
-            return START_NOT_STICKY
-        }
-        active.incrementAndGet()
-        scope.launch {
-            try {
-                Receiver.handle(applicationContext, env)
-            } finally {
-                if (active.decrementAndGet() == 0) stop()
+        when (intent?.action) {
+            ACTION_CANCEL -> {
+                val id = intent.getLongExtra(EXTRA_ID, 0)
+                val ids = if (id == ALL) Transfers.active().map { it.id } else listOf(id)
+                ids.forEach { cancel(this, it) }
+                if (active.get() == 0) stop()
+            }
+            ACTION_SEND -> run(intent.getLongExtra(EXTRA_ID, 0)) { id ->
+                Sender.send(
+                    applicationContext,
+                    id,
+                    intent.getStringExtra(EXTRA_TARGET).orEmpty(),
+                    intent.getStringExtra(EXTRA_TEXT),
+                    intent.getStringArrayExtra(EXTRA_PATHS).orEmpty().toList(),
+                )
+            }
+            else -> {
+                val env = intent?.getStringExtra(EXTRA_ENV)
+                if (env == null) {
+                    if (active.get() == 0) stop()
+                } else {
+                    run(Transfers.newId()) { id -> Receiver.handle(applicationContext, env, id) }
+                }
             }
         }
         return START_NOT_STICKY
     }
 
+    private fun run(id: Long, work: suspend (Long) -> Unit) {
+        active.incrementAndGet()
+        scope.launch {
+            try {
+                work(id)
+            } finally {
+                if (active.decrementAndGet() == 0) stop() else refresh()
+            }
+        }
+    }
+
+    /** Updates the ongoing notification; serialized with [stop] so none outlives the service. */
+    @Synchronized
+    private fun refresh() {
+        if (active.get() > 0) Notifier.ongoing(this)
+    }
+
+    @Synchronized
     private fun stop() {
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -81,6 +128,14 @@ class TransferService : Service() {
 
     companion object {
         private const val EXTRA_ENV = "env"
+        private const val EXTRA_ID = "id"
+        private const val EXTRA_TARGET = "target"
+        private const val EXTRA_TEXT = "text"
+        private const val EXTRA_PATHS = "paths"
+        private const val ACTION_SEND = "io.github.guidin9.warpshot.SEND"
+        private const val ACTION_CANCEL = "io.github.guidin9.warpshot.CANCEL"
+        /** [EXTRA_ID] value for "cancel every running transfer". */
+        const val ALL = -1L
 
         fun start(ctx: Context, env: String) {
             val i = Intent(ctx, TransferService::class.java).putExtra(EXTRA_ENV, env)
@@ -89,8 +144,94 @@ class TransferService : Service() {
             } catch (_: Exception) {
                 // Foreground start not allowed (e.g. battery-restricted app): receive
                 // inline within the FCM handler's ~20 s window.
-                runBlocking { withTimeoutOrNull(18_000) { Receiver.handle(ctx, env) } }
+                runBlocking { withTimeoutOrNull(18_000) { Receiver.handle(ctx, env, Transfers.newId()) } }
             }
+        }
+
+        /**
+         * Sends text or files (copies in app storage, deleted afterwards) from the
+         * foreground. Registers the transfer at once so the caller can show it.
+         */
+        fun send(ctx: Context, id: Long, target: String, peer: String, label: String, text: String?, paths: List<String>) {
+            Transfers.start(id, incoming = false, peer = peer, label = label)
+            val i = Intent(ctx, TransferService::class.java)
+                .setAction(ACTION_SEND)
+                .putExtra(EXTRA_ID, id)
+                .putExtra(EXTRA_TARGET, target)
+                .putExtra(EXTRA_TEXT, text)
+                .putExtra(EXTRA_PATHS, paths.toTypedArray())
+            ContextCompat.startForegroundService(ctx, i)
+        }
+
+        /**
+         * Cancels transfer [id]. Right after a send starts the core may not have
+         * registered it yet, so this retries for about two seconds.
+         */
+        fun cancel(ctx: Context, id: Long) {
+            val core = Core.get(ctx) ?: return
+            CoroutineScope(Dispatchers.Default).launch {
+                repeat(10) {
+                    if (core.cancelTransfer(id.toULong())) return@launch
+                    if (Transfers.state.value[id]?.outcome != null) return@launch
+                    delay(200)
+                }
+            }
+        }
+
+        /** The notification's Cancel action for transfer [id] (or [ALL]). */
+        fun cancelIntent(ctx: Context, id: Long): PendingIntent = PendingIntent.getForegroundService(
+            ctx,
+            id.toInt(),
+            Intent(ctx, TransferService::class.java).setAction(ACTION_CANCEL).putExtra(EXTRA_ID, id),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+    }
+}
+
+/** Runs one send and reports its end when no screen shows it. */
+object Sender {
+    suspend fun send(ctx: Context, id: Long, target: String, text: String?, paths: List<String>) {
+        val core = Core.get(ctx)
+        val peer = Transfers.state.value[id]?.peer ?: "your PC"
+        val outcome = try {
+            if (core == null) throw WarpException.NotPaired()
+            if (text != null) {
+                core.sendText(target, text, id.toULong())
+            } else {
+                core.sendFiles(target, paths.map { OutgoingFile(it) }, id.toULong())
+            }
+            Outcome.Done
+        } catch (_: WarpException.Cancelled) {
+            Outcome.Cancelled
+        } catch (e: Exception) {
+            Outcome.Failed(errorText(e))
+        } finally {
+            Outgoing.delete(ctx, paths)
+        }
+        Transfers.finish(id, outcome)
+        if (id !in Transfers.watched) {
+            when (outcome) {
+                Outcome.Done -> Notifier.sent(ctx, peer)
+                is Outcome.Failed -> Notifier.notSent(ctx, peer, outcome.message)
+                Outcome.Cancelled -> {}
+            }
+        }
+    }
+}
+
+/** Copies of shared items in app storage (`cache/outgoing/<n>/<name>`), kept only while sending. */
+object Outgoing {
+    fun dir(ctx: Context): File = File(ctx.cacheDir, "outgoing")
+
+    fun delete(ctx: Context, paths: List<String>) {
+        val root = dir(ctx).canonicalFile
+        for (p in paths) {
+            val f = File(p).canonicalFile
+            val parent = f.parentFile ?: continue
+            // Only our own copies: cache/outgoing/<n>/<name>.
+            if (parent.parentFile != root) continue
+            f.delete()
+            parent.delete() // only if empty
         }
     }
 }
@@ -100,19 +241,26 @@ object Receiver {
     private const val KIND_TEXT = 1uL
     private const val KIND_IMAGE = 2uL
 
-    suspend fun handle(ctx: Context, env: String) {
+    suspend fun handle(ctx: Context, env: String, id: Long) {
         val core = Core.get(ctx) ?: return
         val inbox = File(ctx.cacheDir, "inbox").apply { mkdirs() }
+        val from = runCatching { core.devices().firstOrNull { !it.me }?.name }.getOrNull() ?: "your PC"
+        Transfers.start(id, incoming = true, peer = from, label = "")
         val items = try {
-            core.handleWake(env, inbox.path)
+            core.handleWake(env, inbox.path, id.toULong())
         } catch (e: WarpException.Rejected) {
+            Transfers.finish(id, Outcome.Failed(errorText(e)))
             return // not a wake we accept (replay, stale, not a member): stay silent
+        } catch (_: WarpException.Cancelled) {
+            Transfers.finish(id, Outcome.Cancelled)
+            return // cancelled here or on the PC: nothing to report
         } catch (e: Exception) {
+            Transfers.finish(id, Outcome.Failed(errorText(e)))
             Notifier.failed(ctx, errorText(e))
             return
         }
+        Transfers.finish(id, Outcome.Done)
         if (items.isEmpty()) return // e.g. a group-change wake
-        val from = runCatching { core.devices().firstOrNull { !it.me }?.name }.getOrNull() ?: "your PC"
         val clipboard = ctx.getSystemService(ClipboardManager::class.java)
         for (item in items) {
             if (item.kind == KIND_TEXT) {
@@ -134,6 +282,17 @@ object Receiver {
             Notifier.saved(ctx, from, item.name, uri, item.mime, image)
         }
     }
+}
+
+/** "42 % · 12 MB / 250 MB · 8.1 MB/s" for a running transfer. */
+fun progressLine(ctx: Context, t: TransferState): String {
+    if (!t.running || t.total <= 0) return if (t.incoming) "Connecting…" else "Waiting for ${t.peer}…"
+    val parts = mutableListOf(
+        "${(t.fraction * 100).toInt()} %",
+        "${Formatter.formatShortFileSize(ctx, t.done)} / ${Formatter.formatShortFileSize(ctx, t.total)}",
+    )
+    if (t.bytesPerSec > 0) parts += "${Formatter.formatShortFileSize(ctx, t.bytesPerSec)}/s"
+    return parts.joinToString(" · ")
 }
 
 /** Saves received files with MediaStore: images to Pictures/Warpshot, the rest to Download/Warpshot. */
@@ -205,13 +364,60 @@ object Notifier {
         SLOW_ID,
     )
 
-    fun progress(ctx: Context): Notification =
-        NotificationCompat.Builder(ctx, CH_PROGRESS)
+    /**
+     * The foreground notification: one transfer with its progress and Cancel,
+     * or several with their combined progress and "Cancel all".
+     */
+    fun ongoingNotification(ctx: Context): Notification {
+        val list = Transfers.active()
+        val b = NotificationCompat.Builder(ctx, CH_PROGRESS)
             .setSmallIcon(R.drawable.ic_notify)
-            .setContentTitle("Receiving from your PC…")
             .setOngoing(true)
             .setSilent(true)
-            .build()
+            .setOnlyAlertOnce(true)
+            .setContentIntent(openApp(ctx))
+        val one = list.singleOrNull()
+        when {
+            list.isEmpty() -> b.setContentTitle("Connecting to your PC…").setProgress(0, 0, true)
+            one != null -> {
+                val what = if (one.incoming) "Receiving from ${one.peer}" else "Sending to ${one.peer}"
+                b.setContentTitle(if (one.label.isEmpty()) what else "$what: ${one.label}")
+                    .setContentText(progressLine(ctx, one))
+                    .setProgress(1000, (one.fraction * 1000).toInt(), !one.running || one.total <= 0)
+                    .addAction(0, "Cancel", TransferService.cancelIntent(ctx, one.id))
+            }
+            else -> {
+                val total = list.sumOf { it.total }
+                val done = list.sumOf { it.done }
+                b.setContentTitle("${list.size} transfers")
+                    .setContentText(list.joinToString(", ") { if (it.incoming) "from ${it.peer}" else "to ${it.peer}" })
+                    .setProgress(1000, if (total > 0) (done * 1000 / total).toInt() else 0, total <= 0)
+                    .addAction(0, "Cancel all", TransferService.cancelIntent(ctx, TransferService.ALL))
+            }
+        }
+        return b.build()
+    }
+
+    /** Refreshes the foreground notification. */
+    fun ongoing(ctx: Context) {
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        NotificationManagerCompat.from(ctx).notify(PROGRESS_ID, ongoingNotification(ctx))
+    }
+
+    /** A send finished while no screen showed it. */
+    fun sent(ctx: Context, peer: String) = post(
+        ctx,
+        builder(ctx).setContentTitle("Sent to $peer").setContentIntent(openApp(ctx)),
+    )
+
+    fun notSent(ctx: Context, peer: String, message: String) = post(
+        ctx,
+        builder(ctx).setContentTitle("Not sent to $peer").setContentText(message).setContentIntent(openApp(ctx)),
+    )
 
     fun text(ctx: Context, from: String, text: String) = post(
         ctx,

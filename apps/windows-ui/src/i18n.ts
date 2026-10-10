@@ -98,6 +98,19 @@ const en = {
   "history.delete": "Delete entry",
   "history.failed": "Failed",
   "history.more": "Load more",
+  "transfers.title": "Transfers in progress",
+  "transfers.in": "Receiving from {peer}",
+  "transfers.out": "Sending to {peer}",
+  "transfers.incoming": "Incoming items",
+  "transfers.items": "{n} items",
+  "transfers.waiting": "Waiting for the device…",
+  "transfers.starting": "Starting…",
+  "transfers.rate": "{rate}/s",
+  "transfers.left": "about {time} left",
+  "transfers.cancelling": "Cancelling…",
+  "duration.s": "{n} s",
+  "duration.m": "{n} min",
+  "duration.h": "{n} h {m} min",
   "alert.added.title": "A new device joined your group",
   "alert.added.body": "{by} added {name} ({platform}). If this wasn't you, remove it now.",
   "alert.notMe": "This wasn't me",
@@ -203,6 +216,19 @@ const tr: Partial<Record<Key, string>> = {
   "history.delete": "Kaydı sil",
   "history.failed": "Başarısız",
   "history.more": "Daha fazla yükle",
+  "transfers.title": "Süren aktarımlar",
+  "transfers.in": "{peer} cihazından alınıyor",
+  "transfers.out": "{peer} cihazına gönderiliyor",
+  "transfers.incoming": "Gelen öğeler",
+  "transfers.items": "{n} öğe",
+  "transfers.waiting": "Cihazın yanıtı bekleniyor…",
+  "transfers.starting": "Başlıyor…",
+  "transfers.rate": "{rate}/sn",
+  "transfers.left": "yaklaşık {time} kaldı",
+  "transfers.cancelling": "İptal ediliyor…",
+  "duration.s": "{n} sn",
+  "duration.m": "{n} dk",
+  "duration.h": "{n} sa {m} dk",
   "alert.added.title": "Grubunuza yeni bir cihaz katıldı",
   "alert.added.body": "{by}, {name} ({platform}) cihazını ekledi. Bunu siz yapmadıysanız hemen kaldırın.",
   "alert.notMe": "Bu ben değildim",
@@ -235,6 +261,14 @@ export function relativeTime(ms: number): string {
   if (abs < 3600) return rtf.format(Math.round(diff / 60), "minute");
   if (abs < 86400) return rtf.format(Math.round(diff / 3600), "hour");
   return rtf.format(Math.round(diff / 86400), "day");
+}
+
+/** A rough remaining time: seconds under a minute, then minutes, then hours. */
+export function formatDuration(seconds: number): string {
+  const s = Math.max(1, Math.round(seconds));
+  if (s < 60) return t("duration.s", { n: s });
+  if (s < 3600) return t("duration.m", { n: Math.round(s / 60) });
+  return t("duration.h", { n: Math.floor(s / 3600), m: Math.round((s % 3600) / 60) });
 }
 
 export function formatSize(bytes: number): string {

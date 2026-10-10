@@ -133,12 +133,24 @@ fn on_menu(hwnd: HWND, cmd: MenuCommand) {
                 a.cmd.send(Cmd::SetDefaultIndex(i))
             });
         }
+        MenuCommand::Cancel(id) => {
+            with_app(|a| a.cmd.send(Cmd::Cancel(id)));
+        }
         MenuCommand::Settings | MenuCommand::Device(_) => open_ui(),
     }
 }
 
 /// Applies a message from the runtime thread.
 fn on_ui_msg(hwnd: HWND, msg: UiMsg) {
+    // A test instance stays off the user's desktop.
+    if warpshot_agent::test_instance().is_some()
+        && matches!(
+            msg,
+            UiMsg::Toast { .. } | UiMsg::Flyout { .. } | UiMsg::Hotkey(_)
+        )
+    {
+        return;
+    }
     match msg {
         UiMsg::Toast { title, body, image } => show_toast(&title, &body, image.as_deref()),
         UiMsg::ClipText(t) => {
@@ -156,7 +168,23 @@ fn on_ui_msg(hwnd: HWND, msg: UiMsg) {
         }
         UiMsg::Flyout { text, tone } => osd::show(&text, tone),
         UiMsg::Menu(m) => {
-            with_app(|a| a.menu = m);
+            with_app(|a| {
+                let transfers = std::mem::take(&mut a.menu.transfers);
+                a.menu = MenuModel { transfers, ..m };
+            });
+        }
+        UiMsg::Transfers(list) => {
+            let idle = list.is_empty();
+            with_app(|a| {
+                if let Some(t) = a.tray.as_mut() {
+                    t.set_tooltip(&tray::tooltip(&list));
+                }
+                a.menu.transfers = list;
+            });
+            // Progress arrives about once a second: trim only when all are done.
+            if !idle {
+                return;
+            }
         }
         UiMsg::Hotkey(s) => {
             if let Ok(hk) = Hotkey::parse(&s) {
@@ -336,7 +364,12 @@ fn run_agent() -> ExitCode {
     let Some(hwnd) = create_window() else {
         return ExitCode::FAILURE;
     };
-    let tray = Tray::add(hwnd, "Warpshot").ok();
+    let test = warpshot_agent::test_instance().is_some();
+    let tray = if test {
+        None
+    } else {
+        Tray::add(hwnd, "Warpshot").ok()
+    };
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
     APP.with(|a| {
         *a.borrow_mut() = Some(App {
@@ -348,7 +381,8 @@ fn run_agent() -> ExitCode {
     });
 
     // The default hotkey; the service sends `UiMsg::Hotkey` if settings differ.
-    if let Ok(hk) = Hotkey::parse(hotkey::DEFAULT_HOTKEY)
+    if !test
+        && let Ok(hk) = Hotkey::parse(hotkey::DEFAULT_HOTKEY)
         && let Err(hotkey::RegisterError::Taken) = hotkey::register(hwnd, HOTKEY_SEND, &hk)
     {
         let _ = toast::show(&toast::Toast {

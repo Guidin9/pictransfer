@@ -60,7 +60,11 @@ pub mod code {
 
 /// The agent's pipe name for the current user.
 pub fn pipe_name() -> io::Result<String> {
-    Ok(format!(r"\\.\pipe\warpshot-{}", current_user_sid()?))
+    Ok(format!(
+        r"\\.\pipe\warpshot-{}{}",
+        current_user_sid()?,
+        crate::instance_suffix()
+    ))
 }
 
 /// An error object: `{code, message}`.

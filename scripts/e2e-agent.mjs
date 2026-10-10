@@ -3,11 +3,13 @@
 // (crates/ffi/examples/phone_sim, the same core object the Android app uses).
 //
 //   cd server; npx wrangler dev --local --port 8787     (in another shell)
-//   cargo build -p warpshot-agent -p warpshot-ffi --example phone_sim
+//   cargo build -p warpshot-agent; cargo build -p warpshot-ffi --example phone_sim
 //   node scripts/e2e-agent.mjs
 //
-// The agent runs with a temporary data dir; clipboard writes and toasts are
-// turned off so the test does not touch the desktop session.
+// The agent runs with a temporary data dir as a separate test instance
+// (WARPSHOT_INSTANCE, debug builds only: own pipe and mutex, no tray icon,
+// hotkey, toasts or flyouts), so it runs next to the user's real agent;
+// clipboard writes are turned off so the test does not touch the desktop.
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
@@ -39,11 +41,12 @@ const check = (name, ok, extra = "") => {
 };
 
 const sid = execFileSync(path.join(process.env.SystemRoot ?? "C:\Windows", "System32", "whoami.exe"), ["/user", "/fo", "csv", "/nh"], { encoding: "utf8" }).trim().split(",")[1].replace(/"/g, "");
-const pipeName = `\\\\.\\pipe\\warpshot-${sid}`;
+const instance = `e2e${process.pid}`;
+const pipeName = `\\\\.\\pipe\\warpshot-${sid}-${instance}`;
 
 const agent = spawn(agentExe, [], {
   detached: keep,
-  env: { ...process.env, WARPSHOT_DATA_DIR: agentDir },
+  env: { ...process.env, WARPSHOT_DATA_DIR: agentDir, WARPSHOT_INSTANCE: instance },
   stdio: "ignore",
 });
 
@@ -83,6 +86,7 @@ const sock = await connect();
 let nextId = 1;
 const pending = new Map();
 const waiters = [];
+const events = []; // every event, for the transfer checks
 let buf = "";
 sock.on("data", (d) => {
   buf += d;
@@ -95,6 +99,7 @@ sock.on("data", (d) => {
       pending.get(m.id)(m);
       pending.delete(m.id);
     } else if (m.event) {
+      events.push(m);
       for (const w of [...waiters]) if (w.name === m.event) { w.resolve(m.data); waiters.splice(waiters.indexOf(w), 1); }
     }
   }
@@ -163,6 +168,63 @@ try {
   r = phone("send-file", me, big);
   const bigOut = path.join(recvDir, "big.bin");
   check("phone → PC 5 MB file", r.ok && fs.existsSync(bigOut) && fs.statSync(bigOut).size === 5 << 20, r.out.trim());
+  // The agent announced that receive with progress up to the full size.
+  await sleep(300); // `phone()` blocked the event loop: let the pipe events in
+  const tin = events.filter((e) => e.event === "transfer.started" && e.data.direction === "in").at(-1)?.data;
+  const prog = events.filter((e) => e.event === "transfer.progress" && e.data.transfer === tin?.transfer).map((e) => e.data);
+  const tinDone = events.find((e) => e.event === "transfer.done" && e.data.transfer === tin?.transfer)?.data;
+  check(
+    "receive progress events",
+    tin?.peer === "Sim Phone" && prog.length >= 2 && prog[0].done_bytes === 0 &&
+      prog.at(-1).done_bytes === 5 << 20 && prog.at(-1).total_bytes === 5 << 20 && tinDone?.ok === true,
+    `${prog.length} reports`,
+  );
+  const sims = r.out.split("\n").filter((l) => l.includes('"progress"')).map((l) => JSON.parse(l));
+  check("phone send progress", sims.length >= 2 && sims.at(-1).done === 5 << 20, `${sims.length} reports`);
+  const idle = await rpc("transfer.list");
+  check("transfer.list empty after", idle.transfers.length === 0, JSON.stringify(idle));
+
+  // Cancel on the PC while the phone sends 64 MB: both sides stop, no file stays.
+  const huge = path.join(tmp, "huge.bin");
+  fs.writeFileSync(huge, Buffer.alloc(64 << 20, 7));
+  const before = fs.readdirSync(recvDir).length;
+  const started = waitEvent("transfer.started");
+  const firstProgress = waitEvent("transfer.progress");
+  const sending = phoneAsync("send-file", me, huge);
+  const st2 = await started;
+  await firstProgress;
+  const listed = await rpc("transfer.list");
+  check(
+    "transfer.list shows it",
+    listed.transfers.some((x) => x.transfer === st2.transfer && x.direction === "in" && x.state === "running"),
+    JSON.stringify(listed.transfers),
+  );
+  const cdone = waitEvent("transfer.done");
+  await rpc("transfer.cancel", { transfer: st2.transfer });
+  const cd = await cdone;
+  const sres = await sending;
+  check("PC cancel: agent reports cancelled", cd.ok === false && cd.code === "cancelled", JSON.stringify(cd));
+  check("PC cancel: phone sees Cancelled", !sres.ok && sres.out.includes("Cancelled"), sres.out.trim().split("\n").at(-1));
+  await sleep(300);
+  const after = fs.readdirSync(recvDir);
+  check("PC cancel: no partial or new file", after.length === before && !after.some((f) => f.endsWith(".part")), after.join(","));
+  const unknown = await rpc("transfer.cancel", { transfer: st2.transfer }).catch((e) => e);
+  check("transfer.cancel of a finished transfer", unknown.code === "not-found", JSON.stringify(unknown));
+
+  // Cancel on the phone at its first progress report.
+  const cdone2 = waitEvent("transfer.done");
+  const pc2 = await phoneAsync("send-file-cancel", me, huge);
+  const cd2 = await cdone2;
+  check(
+    "phone cancel: phone sees Cancelled",
+    !pc2.ok && pc2.out.includes('"found":true') && pc2.out.includes("Cancelled"),
+    pc2.out.trim().split("\n").at(-1),
+  );
+  check("phone cancel: agent reports cancelled", cd2.ok === false && cd2.code === "cancelled", JSON.stringify(cd2));
+  await sleep(300);
+  const after2 = fs.readdirSync(recvDir);
+  check("phone cancel: no partial or new file", after2.length === before && !after2.some((f) => f.endsWith(".part")), after2.join(","));
+
   const hist = await rpc("history.list", { limit: 10 });
   check("history has 3 incoming", hist.filter((h) => h.direction === "in").length === 3, hist.map((h) => h.kind).join(","));
 

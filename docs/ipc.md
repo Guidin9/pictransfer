@@ -38,12 +38,22 @@ The agent owns all state, keys and network access; the UI holds none of them.
 | `history.delete` | `{id}` | `{}` |
 | `send.files` | `{paths: [string], target?: id}` | `{transfer: id}` |
 | `send.text` | `{text, target?: id}` | `{transfer: id}` |
+| `transfer.list` | – | `{transfers: [Transfer]}` — the running transfers (below) |
+| `transfer.cancel` | `{transfer}` | `{}`, or error `not-found` if it already ended. The transfer then ends with `transfer.done {ok: false, code: "cancelled"}`; the receiving side deletes partial files (protocol §8.4 "Cancellation") |
 | `group.not_me` | `{id}` | `{}` — "This wasn't me": removes the device (reason `not-me`) |
 | `debug.counters` | – | `{ws_bytes_in, ws_bytes_out, transfers, route_direct, route_relay_only, route_slow, ...}` (ids and counts only; `route_*` count finished transfers by how they travelled, see `transfer.slow`) |
 
 `Settings` = `{hotkey, default_target, save_dir, ask_above_mb, relay_data, autostart,
 on_receive: {save, clipboard, notify, history}, history_days, history_items}`
 (defaults in architecture.md §8).
+
+`Transfer` = `{transfer, direction: "in" | "out", peer, label, items,
+state: "waiting" | "running", done_bytes, total_bytes, bytes_per_sec,
+started_ms}`. `peer` is the other device's name; `label` is the first item's
+name (`"name +2"` for more, `""` for text and for incoming transfers before the
+offer). `waiting`: queued, or waiting for the woken device to answer;
+`running`: items accepted, data flowing. Byte counts cover item data only
+(inline text counts as 0).
 
 ## Events
 
@@ -53,8 +63,9 @@ on_receive: {save, clipboard, notify, history}, history_days, history_items}`
 | `pair.sas` | `{sas, peer_name, peer_platform}` — show it and ask the user (`pair.confirm`) |
 | `pair.done` | `{peer_id}` |
 | `pair.failed` | `{code: "expired" \| "proof" \| "rejected" \| "other-group" \| "network"}` |
-| `transfer.progress` | `{transfer, done_bytes, total_bytes}` (at most 4 per second) |
-| `transfer.done` | `{transfer, ok, code?}` |
+| `transfer.started` | `Transfer` — a send or receive began (state `waiting`) |
+| `transfer.progress` | `{transfer, done_bytes, total_bytes, bytes_per_sec}` — the first one (`done_bytes: 0`) means `running`; then at most 4 per second, and one at the end |
+| `transfer.done` | `{transfer, ok, code?}` — `code`: `cancelled` (here or on the other device; no toast), `offline`, `no-answer`, `rejected`, `timeout`, `network`, ... |
 | `transfer.slow` | `{direction: "in" \| "out"}` — a transfer has had no direct path for 8 s and crawls through the rate-limited relay; sent once per transfer (the agent also shows a toast) |
 | `group.alert` | `{kind: "device-added", id, name, platform, by_name}` (§4.6; the UI offers "This wasn't me") |
 | `group.fork` | `{}` — security alert: transfers are stopped until re-pairing (§4.5) |

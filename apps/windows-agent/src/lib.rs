@@ -29,3 +29,22 @@ pub mod single_instance;
 pub mod toast;
 pub mod tray;
 pub mod win;
+
+/// Debug builds only: `WARPSHOT_INSTANCE=<name>` runs a separate test agent
+/// next to the user's real one, with its own mutex and pipe names and no tray
+/// icon, hotkey, toasts or flyouts (scripts/e2e-agent.mjs). Release builds
+/// ignore the variable.
+pub fn test_instance() -> Option<String> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    std::env::var("WARPSHOT_INSTANCE")
+        .ok()
+        .filter(|s| !s.is_empty() && s.len() <= 32)
+        .filter(|s| s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+}
+
+/// `-<name>` for a [`test_instance`], else empty.
+pub fn instance_suffix() -> String {
+    test_instance().map(|s| format!("-{s}")).unwrap_or_default()
+}

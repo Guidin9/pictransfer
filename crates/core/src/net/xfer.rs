@@ -1,15 +1,27 @@
 //! Transfer sessions over iroh (protocol §8): admission, handshake, in-band log
 //! sync, offer/accept, item streams, receiver durability and naming.
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, Instant},
+};
 
 use iroh::{
     Endpoint,
     endpoint::{Connection, RecvStream, SendStream},
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::Notify,
+};
 
-use super::{IDLE_TIMEOUT, NetError, close, connect, ekm, read_frame, remote_id, write_frame};
+use super::{
+    IDLE_TIMEOUT, NetError, close, connect, ekm, explain, read_frame, remote_id, write_frame,
+};
 use crate::{
     keys::{self, EndpointId},
     log::{Head, Incoming, Log},
@@ -103,6 +115,158 @@ pub struct Policy {
     pub accept_large: bool,
 }
 
+/// Bytes moved so far in one transfer (item data only; inline text is free).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Progress {
+    pub done: u64,
+    pub total: u64,
+    /// Smoothed throughput; 0 until the second report.
+    pub bytes_per_sec: u64,
+}
+
+/// Progress reports are rate-limited to this interval (plus one at the start
+/// and one at the end), so UIs can forward every report.
+pub const PROGRESS_EVERY: Duration = Duration::from_millis(250);
+
+pub type ProgressFn = Box<dyn FnMut(Progress) + Send>;
+
+/// Counts bytes and reports [`Progress`] at most every [`PROGRESS_EVERY`].
+struct Meter {
+    report: ProgressFn,
+    total: u64,
+    done: u64,
+    rate: u64,
+    last_at: Instant,
+    last_done: u64,
+}
+
+impl std::fmt::Debug for Meter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Meter({}/{})", self.done, self.total)
+    }
+}
+
+impl Meter {
+    fn new(report: ProgressFn) -> Self {
+        Self {
+            report,
+            total: 0,
+            done: 0,
+            rate: 0,
+            last_at: Instant::now(),
+            last_done: 0,
+        }
+    }
+
+    fn start(&mut self, total: u64) {
+        self.total = total;
+        self.done = 0;
+        self.rate = 0;
+        self.emit();
+    }
+
+    fn add(&mut self, n: usize) {
+        self.done = self.done.saturating_add(n as u64);
+        if self.last_at.elapsed() >= PROGRESS_EVERY {
+            self.sample();
+            self.emit();
+        }
+    }
+
+    fn finish(&mut self) {
+        if self.done != self.last_done {
+            self.sample();
+            self.emit();
+        }
+    }
+
+    /// Updates the rate: an exponential average (weight 1/4) of the
+    /// throughput since the previous report.
+    fn sample(&mut self) {
+        let ms = u64::try_from(self.last_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+        if ms == 0 {
+            return;
+        }
+        let now = self
+            .done
+            .saturating_sub(self.last_done)
+            .saturating_mul(1000)
+            .checked_div(ms)
+            .unwrap_or(0);
+        self.rate = if self.rate == 0 {
+            now
+        } else {
+            self.rate.saturating_mul(3).saturating_add(now) / 4
+        };
+    }
+
+    fn emit(&mut self) {
+        (self.report)(Progress {
+            done: self.done,
+            total: self.total,
+            bytes_per_sec: self.rate,
+        });
+        self.last_done = self.done;
+        self.last_at = Instant::now();
+    }
+}
+
+/// Cancels one transfer from outside its task (a UI button, a notification
+/// action). Before the session exists, waiters use [`Cancel::cancelled`];
+/// once a connection is attached, cancelling closes it with `CANCELLED`, which
+/// makes every pending stream operation on both sides fail promptly (§8.4).
+#[derive(Debug, Clone, Default)]
+pub struct Cancel(Arc<CancelInner>);
+
+#[derive(Debug, Default)]
+struct CancelInner {
+    flag: AtomicBool,
+    notify: Notify,
+    conn: std::sync::Mutex<Option<Connection>>,
+}
+
+impl Cancel {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.0.flag.store(true, Ordering::SeqCst);
+        self.0.notify.notify_waiters();
+        if let Ok(c) = self.0.conn.lock()
+            && let Some(conn) = c.as_ref()
+        {
+            close(conn, code::CANCELLED);
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.flag.load(Ordering::SeqCst)
+    }
+
+    /// Resolves once [`Cancel::cancel`] has been called.
+    pub async fn cancelled(&self) {
+        loop {
+            // Created before the check, so a `notify_waiters` in between is not lost.
+            let n = self.0.notify.notified();
+            if self.is_cancelled() {
+                return;
+            }
+            n.await;
+        }
+    }
+
+    /// Ties the handle to `conn`; closes it at once if already cancelled.
+    pub fn attach(&self, conn: &Connection) {
+        if let Ok(mut c) = self.0.conn.lock() {
+            *c = Some(conn.clone());
+        }
+        if self.is_cancelled() {
+            close(conn, code::CANCELLED);
+        }
+    }
+}
+
 /// An established, keyed control channel.
 #[derive(Debug)]
 pub struct Session {
@@ -116,6 +280,8 @@ pub struct Session {
     pub hello_session: [u8; 16],
     pub peer: EndpointId,
     pub peer_head: Head,
+    meter: Option<Meter>,
+    cancel: Option<Cancel>,
 }
 
 fn require_member(log: &Log, conn: &Connection) -> Result<EndpointId, NetError> {
@@ -173,6 +339,8 @@ pub async fn dial(
             hello_session: session,
             peer: *peer,
             peer_head: ack.head,
+            meter: None,
+            cancel: None,
         })
     }
     .await;
@@ -219,6 +387,8 @@ pub async fn accept(ep: &Endpoint, conn: Connection, log: &Log) -> Result<Sessio
             hello_session: hello.session,
             peer,
             peer_head: hello.head,
+            meter: None,
+            cancel: None,
         })
     }
     .await;
@@ -229,6 +399,36 @@ pub async fn accept(ep: &Endpoint, conn: Connection, log: &Log) -> Result<Sessio
 }
 
 impl Session {
+    /// Reports item-data progress of the transfer that follows: once when the
+    /// items are accepted, then at most every [`PROGRESS_EVERY`], and at the end.
+    pub fn on_progress(&mut self, report: impl FnMut(Progress) + Send + 'static) {
+        self.meter = Some(Meter::new(Box::new(report)));
+    }
+
+    /// Lets `cancel` abort this session (see [`Cancel`]).
+    pub fn cancel_with(&mut self, cancel: &Cancel) {
+        cancel.attach(&self.conn);
+        self.cancel = Some(cancel.clone());
+    }
+
+    fn tick(&mut self, n: usize) {
+        if let Some(m) = self.meter.as_mut() {
+            m.add(n);
+        }
+    }
+
+    fn meter_start(&mut self, total: u64) {
+        if let Some(m) = self.meter.as_mut() {
+            m.start(total);
+        }
+    }
+
+    fn meter_finish(&mut self) {
+        if let Some(m) = self.meter.as_mut() {
+            m.finish();
+        }
+    }
+
     pub async fn send_ctrl(&mut self, msg: &Ctrl) -> Result<(), NetError> {
         let ct = self.tx.seal(&msg.encode())?;
         write_frame(&mut self.send, &ct).await
@@ -249,6 +449,11 @@ impl Session {
     /// local side receives are validated as a continuation; a fork aborts.
     /// Returns true if `log` changed (the caller persists it).
     pub async fn sync_logs(&mut self, log: &mut Log, now_ms: u64) -> Result<bool, NetError> {
+        let r = self.sync_logs_inner(log, now_ms).await;
+        r.map_err(|e| outcome(&self.conn, self.cancel.as_ref(), e))
+    }
+
+    async fn sync_logs_inner(&mut self, log: &mut Log, now_ms: u64) -> Result<bool, NetError> {
         let mine = log.head().ok_or(NetError::State("no log"))?;
         let theirs = self.peer_head;
         if mine == theirs {
@@ -324,7 +529,14 @@ impl Session {
 
     /// Sender role: offer, stream accepted items, collect acks, say bye.
     /// Returns `(id, ok)` per offered item (declined items are `false`).
-    pub async fn send_items(mut self, items: Vec<OutItem>) -> Result<Vec<(u32, bool)>, NetError> {
+    pub async fn send_items(self, items: Vec<OutItem>) -> Result<Vec<(u32, bool)>, NetError> {
+        let (conn, cancel) = (self.conn.clone(), self.cancel.clone());
+        self.send_items_inner(items)
+            .await
+            .map_err(|e| outcome(&conn, cancel.as_ref(), e))
+    }
+
+    async fn send_items_inner(mut self, items: Vec<OutItem>) -> Result<Vec<(u32, bool)>, NetError> {
         let offer = Ctrl::Offer {
             session: self.hello_session,
             items: items.iter().map(|o| o.item.clone()).collect(),
@@ -338,6 +550,8 @@ impl Session {
             }
             _ => return Err(self.fail(NetError::Xfer(xfer::XferError::Shape))),
         };
+        let total = streamed_total(items.iter().map(|o| &o.item), &accepted);
+        self.meter_start(total);
         let mut results = Vec::with_capacity(items.len());
         for o in &items {
             if !accepted.contains(&o.item.id) {
@@ -360,6 +574,7 @@ impl Session {
                 _ => return Err(self.fail(NetError::Xfer(xfer::XferError::Shape))),
             }
         }
+        self.meter_finish();
         self.send_ctrl(&Ctrl::Bye).await?;
         let _ = self.send.finish();
         // The receiver closes with code 0 after Bye.
@@ -392,6 +607,7 @@ impl Session {
                     total = total.saturating_add(c.len() as u64);
                     let pad_last = last && c.len() == CHUNK;
                     send_chunk(&mut s, &mut sealer, c, last && !pad_last).await?;
+                    self.tick(c.len());
                     if pad_last {
                         send_chunk(&mut s, &mut sealer, &[], true).await?;
                     }
@@ -413,9 +629,11 @@ impl Session {
                     total = total.saturating_add(n as u64);
                     if n < CHUNK {
                         send_chunk(&mut s, &mut sealer, chunk, true).await?;
+                        self.tick(n);
                         break;
                     }
                     send_chunk(&mut s, &mut sealer, chunk, false).await?;
+                    self.tick(n);
                     if m == 0 {
                         send_chunk(&mut s, &mut sealer, &[], true).await?;
                         break;
@@ -434,7 +652,19 @@ impl Session {
     }
 
     /// Receiver role. `decide` may veto items (user prompt); size policy applies first.
+    /// On any error, cancellation included, no partial file is left behind.
     pub async fn receive(
+        self,
+        policy: &Policy,
+        decide: impl FnMut(&Item) -> bool,
+    ) -> Result<Vec<Received>, NetError> {
+        let (conn, cancel) = (self.conn.clone(), self.cancel.clone());
+        self.receive_inner(policy, decide)
+            .await
+            .map_err(|e| outcome(&conn, cancel.as_ref(), e))
+    }
+
+    async fn receive_inner(
         mut self,
         policy: &Policy,
         mut decide: impl FnMut(&Item) -> bool,
@@ -458,6 +688,8 @@ impl Session {
             return Ok(vec![]);
         }
         self.send_ctrl(&Ctrl::Accept { ids: ids.clone() }).await?;
+        let total = streamed_total(items.iter(), &ids);
+        self.meter_start(total);
         let mut out = Vec::new();
         for item in items.into_iter().filter(|i| ids.contains(&i.id)) {
             if item.is_inline() {
@@ -473,7 +705,13 @@ impl Session {
                     return Err(self.fail(e));
                 }
             };
-            let done = self.recv_ctrl().await?;
+            let done = match self.recv_ctrl().await {
+                Ok(d) => d,
+                Err(e) => {
+                    let _ = tokio::fs::remove_file(&tmp).await;
+                    return Err(e);
+                }
+            };
             let ok = matches!(done, Ctrl::ItemDone { id, blake3, size } if id == item.id && size == item.size && bytes == item.size && blake3 == hash);
             if !ok {
                 let _ = tokio::fs::remove_file(&tmp).await;
@@ -485,7 +723,13 @@ impl Session {
                 .await?;
                 continue;
             }
-            let path = finalize(&policy.dir, &tmp, &item)?;
+            let path = match finalize(&policy.dir, &tmp, &item) {
+                Ok(p) => p,
+                Err(e) => {
+                    let _ = tokio::fs::remove_file(&tmp).await;
+                    return Err(self.fail(e));
+                }
+            };
             self.send_ctrl(&Ctrl::ItemAck {
                 id: item.id,
                 ok: true,
@@ -497,9 +741,13 @@ impl Session {
                 path: Some(path),
             });
         }
-        match self.recv_ctrl().await? {
-            Ctrl::Bye => close(&self.conn, code::OK),
-            _ => return Err(self.fail(NetError::Xfer(xfer::XferError::Shape))),
+        self.meter_finish();
+        // Every accepted item is saved and acknowledged: the transfer succeeded
+        // even if the connection ends (a late cancel, a lost link) before `Bye`.
+        match self.recv_ctrl().await {
+            Ok(Ctrl::Bye) => close(&self.conn, code::OK),
+            Ok(_) => return Err(self.fail(NetError::Xfer(xfer::XferError::Shape))),
+            Err(_) => {}
         }
         Ok(out)
     }
@@ -538,9 +786,30 @@ impl Session {
             }
             hasher.update(&pt);
             f.write_all(&pt).await?;
+            self.tick(pt.len());
         }
         f.sync_all().await?;
         Ok((*hasher.finalize().as_bytes(), total))
+    }
+}
+
+/// Bytes of item data that will flow for the accepted items.
+fn streamed_total<'a>(items: impl Iterator<Item = &'a Item>, accepted: &[u32]) -> u64 {
+    items
+        .filter(|i| !i.is_inline() && accepted.contains(&i.id))
+        .map(|i| i.size)
+        .fold(0u64, u64::saturating_add)
+}
+
+/// The error a transfer ends with: `Cancelled` when our handle fired or the
+/// peer closed with `CANCELLED`; otherwise the peer's close code if it closed.
+fn outcome(conn: &Connection, cancel: Option<&Cancel>, e: NetError) -> NetError {
+    if cancel.is_some_and(Cancel::is_cancelled) {
+        return NetError::Cancelled;
+    }
+    match explain(conn, e) {
+        NetError::Closed(code::CANCELLED) => NetError::Cancelled,
+        other => other,
     }
 }
 
@@ -603,4 +872,61 @@ pub fn mark_of_the_web(path: &Path) {
     }
     #[cfg(not(windows))]
     let _ = path;
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::arithmetic_side_effects,
+    clippy::indexing_slicing
+)]
+mod tests {
+    use std::sync::Mutex;
+
+    use super::*;
+
+    fn meter() -> (Meter, Arc<Mutex<Vec<Progress>>>) {
+        let log: Arc<Mutex<Vec<Progress>>> = Arc::default();
+        let l2 = Arc::clone(&log);
+        (
+            Meter::new(Box::new(move |p| l2.lock().unwrap().push(p))),
+            log,
+        )
+    }
+
+    #[test]
+    fn meter_reports_start_and_end_only_within_the_interval() {
+        let (mut m, log) = meter();
+        m.start(1000);
+        for _ in 0..1000 {
+            m.add(1);
+        }
+        m.finish();
+        m.finish(); // nothing new: no duplicate report
+        let log = log.lock().unwrap();
+        assert_eq!(log.len(), 2);
+        assert_eq!((log[0].done, log[0].total), (0, 1000));
+        assert_eq!((log[1].done, log[1].total), (1000, 1000));
+    }
+
+    #[test]
+    fn meter_reports_again_after_the_interval_with_a_rate() {
+        let (mut m, log) = meter();
+        m.start(10_000);
+        m.add(10);
+        std::thread::sleep(PROGRESS_EVERY + Duration::from_millis(20));
+        m.add(5000);
+        let log = log.lock().unwrap();
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[1].done, 5010);
+        assert!(log[1].bytes_per_sec > 0);
+    }
+
+    #[test]
+    fn empty_transfer_reports_start_only() {
+        let (mut m, log) = meter();
+        m.start(0);
+        m.finish();
+        assert_eq!(log.lock().unwrap().len(), 1);
+    }
 }

@@ -35,6 +35,7 @@ const ID_SETTINGS: u32 = 1;
 const ID_QUIT: u32 = 2;
 const ID_DEVICE_BASE: u32 = 100;
 const ID_TARGET_BASE: u32 = 1000;
+const ID_CANCEL_BASE: u32 = 3000;
 const MAX_ITEMS: usize = 500;
 
 /// The message Explorer broadcasts after it (re)creates the taskbar.
@@ -140,6 +141,14 @@ pub struct DeviceItem {
     pub online: bool,
 }
 
+/// A running transfer as the tray shows it (roadmap 4b).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransferItem {
+    pub id: u64,
+    /// e.g. "Sending video.mp4 to Pixel: 42 %".
+    pub text: String,
+}
+
 /// What the context menu shows. Filled by the agent from the core state.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MenuModel {
@@ -147,6 +156,17 @@ pub struct MenuModel {
     /// Send targets for the default-target radio group.
     pub targets: Vec<String>,
     pub default_target: Option<usize>,
+    /// Running transfers, each with a "Cancel" item at the top of the menu.
+    pub transfers: Vec<TransferItem>,
+}
+
+/// The tray tooltip for the running transfers.
+pub fn tooltip(transfers: &[TransferItem]) -> String {
+    match transfers {
+        [] => "Warpshot".into(),
+        [t] => format!("Warpshot: {}", t.text),
+        many => format!("Warpshot: {} transfers", many.len()),
+    }
 }
 
 /// A menu choice.
@@ -156,6 +176,8 @@ pub enum MenuCommand {
     Quit,
     Device(usize),
     SetDefaultTarget(usize),
+    /// Cancel the transfer with this id.
+    Cancel(u64),
 }
 
 /// Maps a menu item id back to a command.
@@ -167,9 +189,12 @@ pub fn command_from_id(id: u32, model: &MenuModel) -> Option<MenuCommand> {
         ID_DEVICE_BASE..ID_TARGET_BASE => idx(ID_DEVICE_BASE)
             .filter(|i| *i < model.devices.len())
             .map(MenuCommand::Device),
-        _ => idx(ID_TARGET_BASE)
+        ID_TARGET_BASE..ID_CANCEL_BASE => idx(ID_TARGET_BASE)
             .filter(|i| *i < model.targets.len())
             .map(MenuCommand::SetDefaultTarget),
+        _ => idx(ID_CANCEL_BASE)
+            .and_then(|i| model.transfers.get(i))
+            .map(|t| MenuCommand::Cancel(t.id)),
     }
 }
 
@@ -184,6 +209,17 @@ fn build_menu(model: &MenuModel) -> HMENU {
     // destroys attached submenus).
     unsafe {
         let root = CreatePopupMenu();
+        for (i, t) in model.transfers.iter().take(MAX_ITEMS).enumerate() {
+            AppendMenuW(
+                root,
+                MF_STRING,
+                item_id(ID_CANCEL_BASE, i) as usize,
+                wide(&format!("Cancel: {}", t.text)).as_ptr(),
+            );
+        }
+        if !model.transfers.is_empty() {
+            AppendMenuW(root, MF_SEPARATOR, 0, std::ptr::null());
+        }
         let devices = CreatePopupMenu();
         if model.devices.is_empty() {
             AppendMenuW(
@@ -289,6 +325,10 @@ mod tests {
             }],
             targets: vec!["Pixel".into(), "Tablet".into()],
             default_target: Some(1),
+            transfers: vec![TransferItem {
+                id: 7,
+                text: "Sending a.mp4 to Pixel: 42 %".into(),
+            }],
         }
     }
 
@@ -311,7 +351,23 @@ mod tests {
             Some(MenuCommand::SetDefaultTarget(1))
         );
         assert_eq!(command_from_id(ID_TARGET_BASE + 2, &m), None);
+        assert_eq!(
+            command_from_id(ID_CANCEL_BASE, &m),
+            Some(MenuCommand::Cancel(7))
+        );
+        assert_eq!(command_from_id(ID_CANCEL_BASE + 1, &m), None);
         assert_eq!(command_from_id(50, &m), None);
+    }
+
+    #[test]
+    fn tooltip_names_one_transfer_and_counts_many() {
+        let t = |id| TransferItem {
+            id,
+            text: "Receiving from Pixel: 3 %".into(),
+        };
+        assert_eq!(tooltip(&[]), "Warpshot");
+        assert_eq!(tooltip(&[t(1)]), "Warpshot: Receiving from Pixel: 3 %");
+        assert_eq!(tooltip(&[t(1), t(2)]), "Warpshot: 2 transfers");
     }
 
     #[test]

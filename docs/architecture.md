@@ -67,7 +67,7 @@ warpshot-agent.exe  (single instance: named mutex Local\warpshot-agent-<user SID
 | `ShareActivity` (transparent, `excludeFromRecents`) | Receives `ACTION_SEND` / `ACTION_SEND_MULTIPLE` (`*/*`). A Direct Share target sends immediately; otherwise it shows a minimal device picker |
 | Sharing shortcuts | One dynamic shortcut per paired PC → appears directly in the system share sheet |
 | `PtMessagingService` (FCM) | Receives `{v, e}`; starts `TransferService` within the high-priority exemption |
-| `TransferService` (foreground, `dataSync`) | Opens the envelope via core, dials the sender, receives, runs outputs, stops itself |
+| `TransferService` (foreground, `dataSync`) | Runs every transfer. Receive: opens the envelope via core, dials the sender, receives, runs outputs. Send: takes the items `ShareActivity` copied into app storage and sends them, so a long send survives leaving the share card. Its ongoing notification shows progress with Cancel ("Cancel all" for several); it stops itself when idle |
 | Outputs | MediaStore (`Pictures/Warpshot` for images, `Download/Warpshot` for other files); clipboard (`ClipData` + FileProvider URI or text); `BigPictureStyle` notification (Share / Open / Copy); history |
 | Onboarding | Camera QR scan (CameraX + ZXing), notification permission, guidance to exempt the app from battery optimization (settings intent; no direct-request permission) |
 | Keystore bridge | UniFFI callback interface: wrap/unwrap with an Android Keystore AES-GCM key (StrongBox if available) |
@@ -138,6 +138,20 @@ sequenceDiagram
 
 If the PC is offline (`via: "none"`), the phone reports it immediately. A delivery
 queue for when the PC comes online again is planned for Faz 2.
+
+### 6.2a Progress and cancel (both directions)
+
+The core reports item-data progress per transfer (at most 4 per second;
+`net::xfer::Session::on_progress`) and takes a cancel handle
+(`net::xfer::Cancel`). Cancelling before the session exists stops the wait
+(queue, wake answer); afterwards it closes the connection with `CANCELLED`
+(protocol §8.4), the receiver deletes partial files and both sides end with
+"cancelled", which is never reported as a failure. PC: `transfer.started /
+progress / done` events, `transfer.list` / `transfer.cancel` (docs/ipc.md),
+"Transfers in progress" in the UI, a Cancel item per transfer in the tray menu
+and the progress in the tray tooltip (refreshed at most once a second).
+Android: the app picks a transfer id, passes it to `send_*` / `handle_wake`,
+gets `TransferObserver.on_progress` and cancels with `cancel_transfer(id)`.
 
 ### 6.3 Pairing
 

@@ -46,6 +46,27 @@ export interface HistoryItem {
   ok: boolean;
 }
 
+/** A running send or receive (docs/ipc.md `Transfer`). */
+export interface Transfer {
+  transfer: string;
+  direction: "in" | "out";
+  peer: string;
+  label: string;
+  items: number;
+  state: "waiting" | "running";
+  done_bytes: number;
+  total_bytes: number;
+  bytes_per_sec: number;
+  started_ms: number;
+}
+
+export interface TransferProgress {
+  transfer: string;
+  done_bytes: number;
+  total_bytes: number;
+  bytes_per_sec: number;
+}
+
 export interface HotkeyCheck {
   valid: boolean;
   conflict: boolean;
@@ -83,6 +104,8 @@ type Methods = {
   "history.reveal": [{ id: string }, Record<string, never>];
   "history.delete": [{ id: string }, Record<string, never>];
   "group.not_me": [{ id: string }, Record<string, never>];
+  "transfer.list": [undefined, { transfers: Transfer[] }];
+  "transfer.cancel": [{ transfer: string }, Record<string, never>];
 };
 
 export function rpc<M extends keyof Methods>(
@@ -97,7 +120,8 @@ export type AgentEvent =
   | { event: "pair.sas"; data: { sas: string; peer_name: string; peer_platform: string } }
   | { event: "pair.done"; data: { peer_id: string } }
   | { event: "pair.failed"; data: { code: string } }
-  | { event: "transfer.progress"; data: { transfer: string; done_bytes: number; total_bytes: number } }
+  | { event: "transfer.started"; data: Transfer }
+  | { event: "transfer.progress"; data: TransferProgress }
   | { event: "transfer.done"; data: { transfer: string; ok: boolean; code?: string } }
   | { event: "group.alert"; data: { kind: string; id: string; name: string; platform: string; by_name: string } }
   | { event: "group.fork"; data: Record<string, never> };

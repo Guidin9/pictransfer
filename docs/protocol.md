@@ -527,6 +527,15 @@ all-zero, the dialer sends `Offer`.
 4. The receiver answers `ItemAck` after a durable write.
 5. When finished, the sender sends `Bye` and the receiver closes the connection with code `0`.
 
+**Cancellation:** either side may cancel the whole transfer at any time by
+closing the connection with `CANCELLED`. The receiver deletes the temporary
+files of items it has not acknowledged; items already answered with
+`ItemAck{ok: true}` stay; once every accepted item is acknowledged the
+transfer counts as complete even if the connection closes before `Bye`. A
+cancelled transfer is not an error to report to
+the user as a failure. `Cancel` (t = 6) is reserved for cancelling single
+items; v1 peers do not send it and treat it as a protocol error.
+
 ### 8.5 In-band log sync
 
 The side with the lower head seq sends `LogReq{after: own seq}`. The peer answers
@@ -574,7 +583,8 @@ admission (§8.1) is checked again.
 | 0x21 | VERSION | 0x32 | BUSY |
 | 0x22 | CRYPTO | 0x40 | DIRECT_UNAVAILABLE |
 | 0x23 | PROTOCOL | 0x50 | TIMEOUT |
-| 0x24 | PAIR_PROOF | 0x7F | INTERNAL |
+| 0x24 | PAIR_PROOF | 0x33 | CANCELLED |
+| | | 0x7F | INTERNAL |
 
 ## 9. Endpoint and connection policy
 
